@@ -3,6 +3,7 @@ name = "svgtextbox"
 version = "0.1.0"
 authors = ["Tom McLean <thomasowenmclean@gmail.com>"]
 edition = "2018"
+license = "LGPL-3.0-or-later"
 
 [dependencies]
 cairo-rs = {version = "0.6.0", features = ["svg"]}
