@@ -85,6 +85,9 @@
 //! * Note that although an `SVGTextBox` should have a width and height defined in pixels, and will produce that in the end, under the hood the calculations are in pts.
 //!		This doesn't normally matter to an end user, but do be aware that units might not be what you expect.
 //!		For example, as can be seen above, calls to change the font size are passed on to pango; the unit expected there is the size in pts * `pango::SCALE`.
+//! * There _are_ memory leaks. Fixing them is one of the blockages to making this a public crate. They're minor,
+//! 	but certainly make using this as a long-running program a bad idea.
+//! * Text will not be set to a base size of more than 500pts.
 use std::str;
 use std::fs;
 
