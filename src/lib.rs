@@ -85,7 +85,7 @@
 //! * Note that although an `SVGTextBox` should have a width and height defined in pixels, and will produce that in the end, under the hood the calculations are in pts.
 //!		This doesn't normally matter to an end user, but do be aware that units might not be what you expect.
 //!		For example, as can be seen above, calls to change the font size are passed on to pango; the unit expected there is the size in pts * `pango::SCALE`.
-//! * There _are_ memory leaks. Fixing them is one of the blockages to making this a public crate. They're minor,
+//! * I'm pretty sure that there _are_ memory leaks. Fixing them is one of the blockages to making this a public crate. They're minor,
 //! 	but certainly make using this as a long-running program a bad idea.
 //! * Text will not be set to a base size of more than 500pts.
 use std::str;
@@ -293,7 +293,7 @@ impl SVGTextBox {
 		    layout.change_font_size(max_font_size);
 		} else {
 			// There could be no size at all set.
-			let current_size = layout.get_font_description().unwrap().get_size();
+			let current_size = layout.get_base_font_size();
 			if current_size == 0 {
 				layout.change_font_size(utils::pango_scale(10));
 			}
@@ -307,6 +307,7 @@ impl SVGTextBox {
 		context.move_to(0.0, top_padding_pts);
 		pangocairo::functions::show_layout(&context, &layout);
 	    surface.finish();
+
 	    Ok(writable)
 	}
 
@@ -348,6 +349,7 @@ impl SVGTextBox {
 pub trait LayoutExtension {
 	fn change_font_size(&self, new_size: i32);
 	fn max_font_size(&self) -> i32;
+	fn get_base_font_size(&self) -> i32;
 }
 
 impl LayoutExtension for pango::Layout {
@@ -365,11 +367,11 @@ impl LayoutExtension for pango::Layout {
 	/// let context = cairo::Context::new(&surface);
 	/// let layout = tb.get_layout(&context).unwrap();
 	///
-	/// let original_size = layout.get_font_description().unwrap().get_size();
+	/// let original_size = layout.get_base_font_size();
 	/// assert_eq!(original_size, 10 * pango::SCALE);
 	/// layout.change_font_size(11 * pango::SCALE);
-	/// assert!(original_size != layout.get_font_description().unwrap().get_size());
-	/// assert_eq!(11 * pango::SCALE, layout.get_font_description().unwrap().get_size());
+	/// assert!(original_size != layout.get_base_font_size());
+	/// assert_eq!(11 * pango::SCALE, layout.get_base_font_size());
 	/// ```
 	fn change_font_size(&self, new_size: i32) {
 		let mut font_desc = self.get_font_description().unwrap();
@@ -413,6 +415,23 @@ impl LayoutExtension for pango::Layout {
 	    	}
 	    }
 	    utils::pango_scale(ideal)
+	}
+
+	/// Get the base font size used in this layout.
+	/// ```
+	/// use pango::LayoutExt;
+	/// use svgtextbox::LayoutExtension;
+	///
+	/// // get a layout
+	/// let tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans 10");
+	/// let mut writable = Vec::new();
+	/// let surface = cairo::svg::RefWriter::new(tb.width as f64, tb.height as f64, &mut writable);
+	/// let context = cairo::Context::new(&surface);
+	/// let layout = tb.get_layout(&context).unwrap();
+	///
+	/// assert_eq!(layout.get_base_font_size(), 10 * pango::SCALE)
+	fn get_base_font_size(&self) -> i32 {
+		self.get_font_description().unwrap().get_size()
 	}
 }
 
