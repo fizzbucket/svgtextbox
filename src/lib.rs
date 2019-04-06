@@ -137,11 +137,22 @@ impl SVGTextBox {
 
 	/// Generate a new textbox from the options given.
 	///
-	/// Further options can be given by chaining method calls together.
-	/// For example, to have left-aligned text:
 	/// ```
-	/// let mut tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans");
+	/// let mut tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans 12");
+	/// // this sets certain options;
+	/// // note that some are changed:
+	///	assert_eq!(tb.markup, "Hello World");
+	///	assert_eq!(tb.width, svgtextbox::utils::px_to_pts(100) as i32);
+	///	assert_eq!(tb.height, svgtextbox::utils::px_to_pts(100) as i32);
+	///	assert_eq!(tb.font_desc, pango::FontDescription::from_string("Sans 12"));
+	///	assert_eq!(tb.alignment, None);
+	///	assert_eq!(tb.grow, None);
+	///
+	/// // Further options can be given by chaining method calls together.
+	/// // For example, to have left-aligned text:
+	///
 	/// tb.set_alignment_from_str("left");
+	/// assert_eq!(tb.alignment.unwrap(), pango::Alignment::Left);
 	/// let rendered_svg = tb.to_string();
 	///
 	/// // Alternatively, these can be combined into one: 
@@ -174,6 +185,11 @@ impl SVGTextBox {
 	}
 
 	/// Set a new font description.
+	/// ```
+	/// let mut tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans");
+	/// let fd = pango::FontDescription::from_string("Serif");
+	/// tb.set_font_desc(fd);
+	/// ```
 	pub fn set_font_desc(&mut self, f: pango::FontDescription) -> &mut SVGTextBox {
 		self.font_desc = f;
 		self
@@ -182,6 +198,20 @@ impl SVGTextBox {
 	/// Set how text should be aligned.
 	/// # Arguments
 	/// * `a`: can be any of "left", "centre", "center", and "right". Any other string will result in left-aligned text.
+	///
+	/// ```
+	/// let mut tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans");
+	/// tb.set_alignment_from_str("centre");
+	/// assert_eq!(tb.alignment.unwrap(), pango::Alignment::Center);
+	/// tb.set_alignment_from_str("center");
+	/// assert_eq!(tb.alignment.unwrap(), pango::Alignment::Center);
+	/// tb.set_alignment_from_str("left");
+	/// assert_eq!(tb.alignment.unwrap(), pango::Alignment::Left);
+	/// tb.set_alignment_from_str("right");
+	/// assert_eq!(tb.alignment.unwrap(), pango::Alignment::Right);
+	/// tb.set_alignment_from_str("bad");
+	/// assert_eq!(tb.alignment.unwrap(), pango::Alignment::Left);
+	/// ```
 	pub fn set_alignment_from_str(&mut self, a: &str) -> &mut SVGTextBox {
 		let alignment = match a {
 			"left" => pango::Alignment::Left,
@@ -193,13 +223,27 @@ impl SVGTextBox {
 		self.set_alignment(alignment)
 	}
 
-	/// Set how text should be aligned.
+	/// Set how text should be aligned, using a `pango::Alignment` directly.
+	///
+	/// ```
+	/// let mut tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans");
+	/// tb.set_alignment(pango::Alignment::Center);
+	/// assert_eq!(tb.alignment.unwrap(), pango::Alignment::Center);
+	/// ```
 	pub fn set_alignment(&mut self, a: pango::Alignment) -> &mut SVGTextBox {
 		self.alignment = Some(a);
 		self
 	}
 
 	/// Do _not_ grow or shrink text, but keep it at its original size.
+	/// ```
+	/// // "Hello World" will grow to fit.
+	/// let tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans");
+	/// 
+	/// // "Hello World" will be set in 10 point Sans.
+	/// let static_tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans 10")
+	///						.static_text_size();
+	/// ```
 	pub fn static_text_size(&mut self) -> &mut SVGTextBox {
 		self.grow = Some(false);
 		self
@@ -215,7 +259,7 @@ impl SVGTextBox {
 	}
 
 	/// Get a pango layout from the context with all our choices set.
-	fn get_layout(&self, context: &cairo::Context) -> Result<pango::Layout, &str> {
+	pub fn get_layout(&self, context: &cairo::Context) -> Result<pango::Layout, &str> {
 		let pango_context = self.get_pango_context(context)?;
 		let layout = pango::Layout::new(&pango_context);
 
@@ -232,6 +276,10 @@ impl SVGTextBox {
 	}
 
 	/// Convert `&self` into a Vec<u8> representing the rendered svg file.
+	/// ```
+	/// let tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans");
+	/// let result = tb.to_bytes().unwrap();
+	/// ```
 	pub fn to_bytes(&self) -> Result<Vec<u8>, &str> {
 		let mut writable = Vec::new();
 		let surface = cairo::svg::RefWriter::new(self.width as f64, self.height as f64, &mut writable);
@@ -243,6 +291,12 @@ impl SVGTextBox {
 	    if grow {
 		    let max_font_size = layout.max_font_size();
 		    layout.change_font_size(max_font_size);
+		} else {
+			// There could be no size at all set.
+			let current_size = layout.get_font_description().unwrap().get_size();
+			if current_size == 0 {
+				layout.change_font_size(utils::pango_scale(10));
+			}
 		}
 
 		// pts despite function name.
@@ -257,6 +311,13 @@ impl SVGTextBox {
 	}
 
 	/// Convert `&self` into the rendered svg file, and return as a string.
+	/// A convenience method around `to_bytes`:
+	/// ```
+	/// let tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans");
+	/// let svg_string = tb.to_string().unwrap();
+	/// let b = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans").to_bytes().unwrap();
+	// 	assert_eq!(b, svg_string.as_bytes())
+	/// ```
 	pub fn to_string(&self) -> Result<String, &str> {
 		let v = self.to_bytes().expect("Failed to convert to bytes");
 		let as_str = str::from_utf8(&v).expect("Failed to convert to string.");
@@ -270,7 +331,12 @@ impl SVGTextBox {
 		Ok(())
 	}
 
-	/// Render `&self` and return as a base64-encoded string.
+	/// Render `&self` and return as a base64-encoded string. Also a
+	/// convenience method around `to_bytes`.
+	/// ```
+	/// let tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans");
+	/// let b64 = tb.to_base64().unwrap();
+	/// ```
 	pub fn to_base64(&self) -> Result<String, &str> {
 		let as_bytes = self.to_bytes()?;
 		Ok(base64::encode(&as_bytes))
@@ -279,7 +345,7 @@ impl SVGTextBox {
 }	
 
 
-trait LayoutExtension {
+pub trait LayoutExtension {
 	fn change_font_size(&self, new_size: i32);
 	fn max_font_size(&self) -> i32;
 }
@@ -287,6 +353,24 @@ trait LayoutExtension {
 impl LayoutExtension for pango::Layout {
 
 	/// Change the base font size of this layout.
+	///
+	/// ```
+	/// use pango::LayoutExt;
+	/// use svgtextbox::LayoutExtension;
+	///
+	/// // get a layout
+	/// let tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans 10");
+	/// let mut writable = Vec::new();
+	/// let surface = cairo::svg::RefWriter::new(tb.width as f64, tb.height as f64, &mut writable);
+	/// let context = cairo::Context::new(&surface);
+	/// let layout = tb.get_layout(&context).unwrap();
+	///
+	/// let original_size = layout.get_font_description().unwrap().get_size();
+	/// assert_eq!(original_size, 10 * pango::SCALE);
+	/// layout.change_font_size(11 * pango::SCALE);
+	/// assert!(original_size != layout.get_font_description().unwrap().get_size());
+	/// assert_eq!(11 * pango::SCALE, layout.get_font_description().unwrap().get_size());
+	/// ```
 	fn change_font_size(&self, new_size: i32) {
 		let mut font_desc = self.get_font_description().unwrap();
 		font_desc.set_size(new_size);
@@ -294,7 +378,27 @@ impl LayoutExtension for pango::Layout {
 	}
 
 	/// Return the largest base font size which would
-	/// still avoild text being ellipsized.
+	/// still avoid text being ellipsized.
+	///
+	/// ```
+	/// use pango::LayoutExt;
+	/// use svgtextbox::LayoutExtension;
+	///
+	/// // get a layout
+	/// let tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans 10");
+	/// let mut writable = Vec::new();
+	/// let surface = cairo::svg::RefWriter::new(tb.width as f64, tb.height as f64, &mut writable);
+	/// let context = cairo::Context::new(&surface);
+	/// let layout = tb.get_layout(&context).unwrap();
+	///
+	/// let max_size = layout.max_font_size();
+	/// // A layout at max_size is not ellipsized:
+	/// layout.change_font_size(max_size);
+	/// assert!(!layout.is_ellipsized());
+	/// // But text one pt larger is:
+	/// layout.change_font_size(max_size + pango::SCALE);
+	/// assert!(layout.is_ellipsized());
+	/// ```
 	fn max_font_size(&self) -> i32 {
 		// can't get a binary search to work properly,
 		// but this is quick enough anyway...
