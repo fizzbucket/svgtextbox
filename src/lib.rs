@@ -19,7 +19,7 @@
 //! # Examples
 //!
 //!	```
-//! // Markup should be a string in the Pango Text Attribute Markup Language.
+//! // Markup should be a string in the [Pango Text Attribute Markup Language](https://developer.gnome.org/pango/stable/PangoMarkupFormat.html).
 //! // This particular example produces two lines, "Hello" and "World,"
 //! // where "Hello" is larger and "World" is set in italic and coloured red.
 //! let markup = "<span size=\"larger\">Hello</span>\n<span style=\"italic\" foreground=\"red\">World</span>".to_string();
@@ -85,11 +85,13 @@
 //! * Note that although an `SVGTextBox` should have a width and height defined in pixels, and will produce that in the end, under the hood the calculations are in pts.
 //!		This doesn't normally matter to an end user, but do be aware that units might not be what you expect.
 //!		For example, as can be seen above, calls to change the font size are passed on to pango; the unit expected there is the size in pts * `pango::SCALE`.
-//! * I'm pretty sure that there _are_ memory leaks. Fixing them is one of the blockages to making this a public crate. They're minor,
-//! 	but certainly make using this as a long-running program a bad idea.
-//! * Text will not be set to a base size of more than 500pts.
-use std::str;
+//! * I'm pretty sure that there _are_ memory leaks. Fixing them is one of the blockages to making this a public crate. If present, they're minor,
+//! 	but still enough using this as a long-running program a bad idea.
+//! * Text will not be set to a base size of more than 10000pts.
+//! 	There's no particular reason for this number, but some limit was required. Unless you're making not posters but very oversized billboards, this really should be enough, since
+//! 	it's ~350 cm.
 use std::fs;
+use std::str;
 
 extern crate pango;
 use pango::LayoutExt;
@@ -121,6 +123,17 @@ pub mod utils {
 	pub fn pango_scale(n: i32) -> i32 {
 		n * pango::SCALE
 	}
+
+	/// Just a wrapper around `pango::FontDescription::from_string` to prevent
+	/// needing to import for callers.
+	/// ```
+	/// let a = svgtextbox::utils::pango_font_description_from_str("Sans 10");
+	/// let b = pango::FontDescription::from_string("Sans 10");
+	/// assert_eq!(a, b)
+	/// ```
+	pub fn pango_font_description_from_str(fd: &str) -> pango::FontDescription {
+		pango::FontDescription::from_string(fd)
+	}
 }
 
 pub struct SVGTextBox {
@@ -144,7 +157,7 @@ impl SVGTextBox {
 	///	assert_eq!(tb.markup, "Hello World");
 	///	assert_eq!(tb.width, svgtextbox::utils::px_to_pts(100) as i32);
 	///	assert_eq!(tb.height, svgtextbox::utils::px_to_pts(100) as i32);
-	///	assert_eq!(tb.font_desc, pango::FontDescription::from_string("Sans 12"));
+	///	assert_eq!(tb.font_desc, svgtextbox::utils::pango_font_description_from_str("Sans 12"));
 	///	assert_eq!(tb.alignment, None);
 	///	assert_eq!(tb.grow, None);
 	///
@@ -163,7 +176,7 @@ impl SVGTextBox {
 	/// ```
 	/// # Arguments
 	///
-	/// * `markup`: the text to use, formatted in Pango Markup Language if desired.
+	/// * `markup`: the text to use, formatted in [Pango Markup Language](https://developer.gnome.org/pango/stable/PangoMarkupFormat.html) if desired.
 	/// * `width`: the width of the eventual image, in pixels.
 	/// * `height`: the height of the eventual image, in pixels.
 	/// * `font_desc_str`: a string to be passed to `pango::FontDescription::new_from_string` in order to generate a `FontDescription`.
@@ -178,7 +191,7 @@ impl SVGTextBox {
 			markup: markup,
 			width: pt_width as i32,
 			height: pt_height as i32,
-			font_desc: pango::FontDescription::from_string(font_desc_str),
+			font_desc: utils::pango_font_description_from_str(font_desc_str),
 			alignment: None,
 			grow: None
 		}
@@ -259,6 +272,8 @@ impl SVGTextBox {
 	}
 
 	/// Get a pango layout from the context with all our choices set.
+	/// This is public only to make it possible to give examples for `impl LayoutExtension`
+	/// and probably shouldn't be used directly, really.
 	pub fn get_layout(&self, context: &cairo::Context) -> Result<pango::Layout, &str> {
 		let pango_context = self.get_pango_context(context)?;
 		let layout = pango::Layout::new(&pango_context);
@@ -350,9 +365,47 @@ pub trait LayoutExtension {
 	fn change_font_size(&self, new_size: i32);
 	fn max_font_size(&self) -> i32;
 	fn get_base_font_size(&self) -> i32;
+	fn fits(&self) -> bool;
 }
 
 impl LayoutExtension for pango::Layout {
+
+	fn fits(&self) -> bool {
+		// The simplest check is whether pango
+		// has already decided this doesn't fit.
+		if self.is_ellipsized() {
+			return false;
+		}
+		// But Pango's interpretation of this is not ours,
+		// since we're imposing the idea of a bounding box.
+		// Ink extents are the size of things as printed
+		// logical extents are those intended to be used for
+		// positioning. (Think of a `g` extending below baseline.)
+		// I think that these _logical_ extents are what get used
+		// by pango in calculating whether to ellipsize.
+		// But we actually want to be sure that the ink extents, not the
+		// logical extents, don't go beyond the bounds of our box.
+		// making a check on ellipsization something that sometimes
+		// fails: text will be inked beyond the boundaries of the box,
+		// even if it's not ellipsized.
+		// So we need to check this also.
+		let (ink_extents, _logical_extents) = self.get_extents();
+
+		let x_negative = ink_extents.x < 0;
+		let y_negative = ink_extents.y < 0;
+
+		if x_negative | y_negative {
+			return false;
+		}
+		// this is highly unlikely to be a problem, since ink dimensions 
+		// are always almost less than logical, but might as well check. 
+		let too_high = ink_extents.height > self.get_height();
+		let too_wide = ink_extents.width > self.get_width();
+		if too_high | too_wide {
+			return false;
+		}
+		true
+	}
 
 	/// Change the base font size of this layout.
 	///
@@ -404,11 +457,11 @@ impl LayoutExtension for pango::Layout {
 	fn max_font_size(&self) -> i32 {
 		// can't get a binary search to work properly,
 		// but this is quick enough anyway...
-	    let font_pts_range = 1..501;
+	    let font_pts_range = 1..10001;
 	    let mut ideal = 0;
 	    for i in font_pts_range {
 	    	self.change_font_size(utils::pango_scale(i));
-	    	if self.is_ellipsized() {
+	    	if !self.fits() {
 	    		break;
 	    	} else {
 	    		ideal = i;
