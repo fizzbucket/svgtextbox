@@ -93,9 +93,8 @@
 //!		For example, as can be seen above, calls to change the font size are passed on to pango; the unit expected there is the size in pts * `pango::SCALE`.
 //! * I'm pretty sure that there _are_ memory leaks. Fixing them is one of the blockages to making this a public crate. If present, they're minor,
 //! 	but still enough using this as a long-running program a bad idea.
-//! * Text will not be set to a base size of more than 10000pts.
-//! 	There's no particular reason for this number, but some limit was required. Unless you're making not posters but very oversized billboards, this really should be enough, since
-//! 	it's ~350 cm.
+//! * Text will not be set to a base size of more than 1000pts.
+//! 	There's no particular reason for this number, but some limit was required, and that's high enough to not be a problem for almost anything.
 use std::fs;
 use std::str;
 
@@ -372,6 +371,7 @@ pub trait LayoutExtension {
 	fn max_font_size(&self) -> i32;
 	fn get_base_font_size(&self) -> i32;
 	fn fits(&self) -> bool;
+	fn overflows(&self, n: i32) -> std::cmp::Ordering;
 }
 
 impl LayoutExtension for pango::Layout {
@@ -454,6 +454,19 @@ impl LayoutExtension for pango::Layout {
 		self.set_font_description(&font_desc);
 	}
 
+
+	/// Change font size to `n` * pango::SCALE; if
+	/// the layout then no longer fits, return 
+	/// Ordering::Greater, otherwise Ordering::Less.
+	fn overflows(&self, n:i32) -> std::cmp::Ordering {
+		let scaled = utils::pango_scale(n);
+		self.change_font_size(scaled);
+		if self.fits() {
+			return std::cmp::Ordering::Less;
+		}
+		std::cmp::Ordering::Greater
+	}
+
 	/// Return the largest base font size which would
 	/// still avoid text not fitting the box.
 	///
@@ -477,19 +490,14 @@ impl LayoutExtension for pango::Layout {
 	/// assert!(!layout.fits());
 	/// ```
 	fn max_font_size(&self) -> i32 {
-		// can't get a binary search to work properly,
-		// but this is quick enough anyway...
-	    let font_pts_range = 1..10001;
-	    let mut ideal = 0;
-	    for i in font_pts_range {
-	    	self.change_font_size(utils::pango_scale(i));
-	    	if !self.fits() {
-	    		break;
-	    	} else {
-	    		ideal = i;
-	    	}
-	    }
-	    utils::pango_scale(ideal)
+		let font_pts_vec = (1..1001).collect::<Vec<i32>>();
+		let search_result = font_pts_vec.binary_search_by(|i| self.overflows(*i));
+		// This will always be an error,
+		// representing the index of the lowest size that is too big
+		let index = search_result.err().unwrap();
+		// therefore:
+		let goldilocks = font_pts_vec[index-1];
+		utils::pango_scale(goldilocks)
 	}
 
 	/// Get the base font size used in this layout.

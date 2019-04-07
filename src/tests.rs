@@ -46,4 +46,4 @@ fn check_layout_sizing() {
 	assert!(ink_extents.width <= layout.get_width());
 	assert!((ink_extents.x + logical_extents.width) < layout.get_width());
 	assert!((ink_extents.y + logical_extents.height) < layout.get_height());
-}}
+}
