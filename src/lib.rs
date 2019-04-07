@@ -14,15 +14,20 @@
 //! do complicated text layout in images.
 //!
 //! It adds very few capabilities to what could be done with pango anyway,
-//! but hopefully is substantially easier to use.
+//! but hopefully is substantially easier to use. (It would be nice to never
+//! again know the joys of juggling device units, user units, functions labelled get_pixel which return points,
+//! and the exact nature of ink and logical extents.)
 //!
 //! # Examples
 //!
 //!	```
-//! // Markup should be a string in the [Pango Text Attribute Markup Language](https://developer.gnome.org/pango/stable/PangoMarkupFormat.html).
+//! // Markup should be a string in the Pango Text Attribute Markup Language.
+//! // (See <https://developer.gnome.org/pango/stable/PangoMarkupFormat.html> for more).
 //! // This particular example produces two lines, "Hello" and "World,"
 //! // where "Hello" is larger and "World" is set in italic and coloured red.
-//! let markup = "<span size=\"larger\">Hello</span>\n<span style=\"italic\" foreground=\"red\">World</span>".to_string();
+//! let markup = "<span size=\"larger\">Hello</span>\n\
+//!				  <span style=\"italic\" foreground=\"red\">World</span>"
+//!				 .to_string();
 //! let width = 500;
 //! let height = 500;
 //! let font = "Serif 12";
@@ -32,7 +37,8 @@
 //! // The following will generate an image where the text stays at its original size
 //! // and is all set in 10pt sans.
 //! let markup2 = "Hello World".to_string();
-//! let static_svg = svgtextbox::SVGTextBox::new(markup2, width, height, "Sans 10").static_text_size().to_string();
+//! let static_svg = svgtextbox::SVGTextBox::new(markup2, width, height, "Sans 10")
+//!						.static_text_size().to_string();
 //!
 //! let markup3 = "It is also possible to produce a vec<u8>".to_string();
 //! let vec_svg = svgtextbox::SVGTextBox::new(markup3, width, height, "Sans 10").to_bytes();
@@ -370,6 +376,10 @@ pub trait LayoutExtension {
 
 impl LayoutExtension for pango::Layout {
 
+	/// Whether this layout fits within a box of
+	/// `layout.get_width()` x `layout.get_height()`.
+	/// This means that the text is not ellipsized
+	/// and no text or part of text goes outside the box.
 	fn fits(&self) -> bool {
 		// The simplest check is whether pango
 		// has already decided this doesn't fit.
@@ -389,7 +399,11 @@ impl LayoutExtension for pango::Layout {
 		// fails: text will be inked beyond the boundaries of the box,
 		// even if it's not ellipsized.
 		// So we need to check this also.
-		let (ink_extents, _logical_extents) = self.get_extents();
+		
+		let intended_height =  self.get_height();
+		let intended_width = self.get_width();
+
+		let (ink_extents, logical_extents) = self.get_extents();
 
 		let x_negative = ink_extents.x < 0;
 		let y_negative = ink_extents.y < 0;
@@ -399,9 +413,17 @@ impl LayoutExtension for pango::Layout {
 		}
 		// this is highly unlikely to be a problem, since ink dimensions 
 		// are always almost less than logical, but might as well check. 
-		let too_high = ink_extents.height > self.get_height();
-		let too_wide = ink_extents.width > self.get_width();
+		let too_high = ink_extents.height > intended_height;
+		let too_wide = ink_extents.width > intended_width;
 		if too_high | too_wide {
+			return false;
+		}
+
+		// We can also encounter trouble if, for example, the logical height is, when added to
+		// the start point given by ink_extents.y, greater than the total intended height.
+		let total_height = ink_extents.y + logical_extents.height;
+		let total_width = ink_extents.x + logical_extents.width;
+		if (total_height > intended_height) | (total_width > intended_width) {
 			return false;
 		}
 		true
@@ -433,7 +455,7 @@ impl LayoutExtension for pango::Layout {
 	}
 
 	/// Return the largest base font size which would
-	/// still avoid text being ellipsized.
+	/// still avoid text not fitting the box.
 	///
 	/// ```
 	/// use pango::LayoutExt;
@@ -447,12 +469,12 @@ impl LayoutExtension for pango::Layout {
 	/// let layout = tb.get_layout(&context).unwrap();
 	///
 	/// let max_size = layout.max_font_size();
-	/// // A layout at max_size is not ellipsized:
+	/// // A layout at max_size still fits:
 	/// layout.change_font_size(max_size);
-	/// assert!(!layout.is_ellipsized());
+	/// assert!(layout.fits());
 	/// // But text one pt larger is:
 	/// layout.change_font_size(max_size + pango::SCALE);
-	/// assert!(layout.is_ellipsized());
+	/// assert!(!layout.fits());
 	/// ```
 	fn max_font_size(&self) -> i32 {
 		// can't get a binary search to work properly,

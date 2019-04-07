@@ -38,10 +38,12 @@ fn check_layout_sizing() {
 	layout.change_font_size(max);
 	
 	assert!(!layout.is_ellipsized());
-	let (ink_extents, _) = layout.get_extents();
+	let (ink_extents, logical_extents) = layout.get_extents();
 	assert!(ink_extents.x >= 0);
 	assert!(ink_extents.y >= 0);
 
 	assert!(ink_extents.height <= layout.get_height());
 	assert!(ink_extents.width <= layout.get_width());
-}
+	assert!((ink_extents.x + logical_extents.width) < layout.get_width());
+	assert!((ink_extents.y + logical_extents.height) < layout.get_height());
+}}
