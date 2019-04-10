@@ -32,18 +32,20 @@
 //! let height = 500;
 //! let font = "Serif 12";
 //! // generate an image where the text is resized to be as large as possible.
-//! let svg = svgtextbox::SVGTextBox::new(markup, width, height, font).to_string();
+//! let svg = svgtextbox::SVGTextBox::new(markup, width, height, font).unwrap().to_string();
 //!
 //! // The following will generate an image where the text stays at its original size
 //! // and is all set in 10pt sans.
 //! let markup2 = "Hello World".to_string();
 //! let static_svg = svgtextbox::SVGTextBox::new(markup2, width, height, "Sans 10")
-//!						.static_text_size().to_string();
+//!						.unwrap()
+//!						.static_text_size()
+//!						.to_string();
 //!
 //! let markup3 = "It is also possible to produce a vec<u8>".to_string();
-//! let vec_svg = svgtextbox::SVGTextBox::new(markup3, width, height, "Sans 10").to_bytes();
+//! let vec_svg = svgtextbox::SVGTextBox::new(markup3, width, height, "Sans 10").unwrap().to_bytes();
 //! let markup4 = "Or even a base64-encoded string".to_string();
-//! let b64_svg = svgtextbox::SVGTextBox::new(markup4, width, height, "Sans 10").to_base64();
+//! let b64_svg = svgtextbox::SVGTextBox::new(markup4, width, height, "Sans 10").unwrap().to_base64();
 //! ```
 //!
 //! It is possible to format the text layout in various ways beyond using markup.
@@ -53,15 +55,19 @@
 //! extern crate pango;
 //!
 //! let left_aligned = svgtextbox::SVGTextBox::new("Left".to_string(), 100, 100, "Sans")
+//!							.unwrap()
 //!							.set_alignment_from_str("left")
 //!							.to_string();
 //! let also_left = svgtextbox::SVGTextBox::new("Left".to_string(), 100, 100, "Sans")
+//!							.unwrap()
 //!							.set_alignment(pango::Alignment::Left)
 //!							.to_string();
 //! let centre_aligned = svgtextbox::SVGTextBox::new("Centre".to_string(), 100, 100, "Sans")
+//!							.unwrap()
 //!							.set_alignment_from_str("centre")
 //!							.to_string();
 //! let right_aligned = svgtextbox::SVGTextBox::new("Right".to_string(), 100, 100, "Sans")
+//!							.unwrap()
 //!							.set_alignment_from_str("right")
 //!							.to_string();
 //! ```
@@ -82,6 +88,7 @@
 //! fancy_fd.set_weight(pango::Weight::Book);
 //! // [etc]
 //! let fancy = svgtextbox::SVGTextBox::new("Fancy".to_string(), 100, 100, "")
+//!							.unwrap()
 //!							.set_font_desc(fancy_fd)
 //!							.to_string();
 //! ```
@@ -129,7 +136,7 @@ impl SVGTextBox {
 	/// Generate a new textbox from the options given.
 	///
 	/// ```
-	/// let mut tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans 12");
+	/// let mut tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans 12").unwrap();
 	/// // this sets certain options;
 	/// // note that some are changed:
 	///	assert_eq!(tb.markup, "Hello World");
@@ -149,6 +156,7 @@ impl SVGTextBox {
 	/// // Alternatively, these can be combined into one: 
 	/// 
 	/// let rendered = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans")
+	///						.unwrap()
 	///						.set_alignment_from_str("left")
 	///						.to_string();
 	/// ```
@@ -166,13 +174,13 @@ impl SVGTextBox {
 		let pt_height = height as f32 * PX_TO_PT_RATIO;
 
 		let checked_markup = SVGTextBox::check_markup(markup)?;
-		let checked_font_desc_str = SVGTextBox::check_markup(font_desc_str.to_string())?;
+		let checked_font_desc_str = if font_desc_str.contains('\u{0}') {""} else {font_desc_str};
 
 		Ok(SVGTextBox {
 			markup: checked_markup,
 			width: pt_width as i32,
 			height: pt_height as i32,
-			font_desc: pango::FontDescription::from_string(&checked_font_desc_str),
+			font_desc: pango::FontDescription::from_string(checked_font_desc_str),
 			alignment: None,
 			grow: None
 		})
@@ -192,7 +200,7 @@ impl SVGTextBox {
 		Ok(markup)
 	}
 
-	fn check_markup(mut markup: String) -> Result<String, &'static str> {
+	fn check_markup(markup: String) -> Result<String, &'static str> {
 		
 		if markup.len() as i32 > MAX_MARKUP_LEN {
 			return Err("Markup is too long.");
@@ -216,7 +224,7 @@ impl SVGTextBox {
 
 	/// Set a new font description.
 	/// ```
-	/// let mut tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans");
+	/// let mut tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans").unwrap();
 	/// let fd = pango::FontDescription::from_string("Serif");
 	/// tb.set_font_desc(fd.clone());
 	/// assert_eq!(tb.font_desc, fd);
@@ -231,7 +239,7 @@ impl SVGTextBox {
 	/// * `a`: can be any of "left", "centre", "center", and "right". Any other string will result in left-aligned text.
 	///
 	/// ```
-	/// let mut tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans");
+	/// let mut tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans").unwrap();
 	/// tb.set_alignment_from_str("centre");
 	/// assert_eq!(tb.alignment.unwrap(), pango::Alignment::Center);
 	/// tb.set_alignment_from_str("center");
@@ -257,7 +265,7 @@ impl SVGTextBox {
 	/// Set how text should be aligned, using a `pango::Alignment` directly.
 	///
 	/// ```
-	/// let mut tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans");
+	/// let mut tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans").unwrap();
 	/// tb.set_alignment(pango::Alignment::Center);
 	/// assert_eq!(tb.alignment.unwrap(), pango::Alignment::Center);
 	/// ```
@@ -269,10 +277,11 @@ impl SVGTextBox {
 	/// Do _not_ grow or shrink text, but keep it at its original size.
 	/// ```
 	/// // "Hello World" will grow to fit.
-	/// let tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans");
+	/// let tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans").unwrap();
 	/// 
 	/// // "Hello World" will be set in 10 point Sans.
 	/// let static_tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans 10")
+	///						.unwrap()
 	///						.static_text_size();
 	/// ```
 	pub fn static_text_size(&mut self) -> &mut SVGTextBox {
@@ -309,7 +318,7 @@ impl SVGTextBox {
 
 	/// Convert `&self` into a Vec<u8> representing the rendered svg file.
 	/// ```
-	/// let tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans");
+	/// let tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans").unwrap();
 	/// let result = tb.to_bytes().unwrap();
 	/// ```
 	pub fn to_bytes(&self) -> Result<Vec<u8>, &str> {
@@ -350,9 +359,9 @@ impl SVGTextBox {
 	/// Convert `&self` into the rendered svg file, and return as a string.
 	/// A convenience method around `to_bytes`:
 	/// ```
-	/// let tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans");
+	/// let tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans").unwrap();
 	/// let svg_string = tb.to_string().unwrap();
-	/// let b = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans").to_bytes().unwrap();
+	/// let b = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans").unwrap().to_bytes().unwrap();
 	// 	assert_eq!(b, svg_string.as_bytes())
 	/// ```
 	pub fn to_string(&self) -> Result<String, &str> {
@@ -371,7 +380,7 @@ impl SVGTextBox {
 	/// Render `&self` and return as a base64-encoded string. Also a
 	/// convenience method around `to_bytes`.
 	/// ```
-	/// let tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans");
+	/// let tb = svgtextbox::SVGTextBox::new("Hello World".to_string(), 100, 100, "Sans").unwrap();
 	/// let b64 = tb.to_base64().unwrap();
 	/// ```
 	pub fn to_base64(&self) -> Result<String, &str> {
@@ -485,7 +494,8 @@ impl LayoutExtension for pango::Layout {
 			while !self.fits() {
 				let current_size = self.get_base_font_size();
 				let new_size = current_size + SCALE;
-				self.change_font_size(new_size);
+				let change_result = self.change_font_size(new_size);
+				change_result.unwrap();
 				if !self.fits() {
 					return current_size;
 				}
