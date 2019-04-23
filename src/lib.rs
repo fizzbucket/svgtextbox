@@ -40,37 +40,24 @@
 //!						.set_static();
 //! ```
 //!
-//! A SVGTextbox alone isn't very helpful! But there are two key transformations possible:
-//! into a `pango::Layout` and into a `Vec<u8>` representing the rendered image. The latter is the most important; once you have
-//! a vector of bytes, it's trivially easy to produce a string, write to a file, etc.
+//! A SVGTextbox alone isn't very helpful! The trait `SVGTextBoxOut`, however, provides a number of the most common
+//! transformations. (At some future point this is likely to include either native creation of png files or support for
+//! conversion into pngs, but this isn't there yet. `librsvg` or `resvg` are both great conversion tools, though.)
 //!
 //! ```
-//! # use std::convert::TryFrom;
 //! # use std::str;
 //! # use svgtextbox::SVGTextBox;
+//! # use svgtextbox::SVGTextboxOut;
 //! let tb = SVGTextBox::new("Hello World", 100, 100);
-//! let as_bytes = Vec::<u8>::try_from(tb).unwrap();
-//! let as_str = str::from_utf8(&as_bytes).unwrap();
-//! // etc
+//! let as_bytes = tb.as_bytes().unwrap();
+//! let as_base64_with_data_prefix = tb.as_embeddable_base64().unwrap();
+//! let as_svg_string = tb.as_string().unwrap();
+//! // or write to a file
+//! tb.to_file("example.svg").unwrap();
+//! # std::fs::remove_file("example.svg").unwrap();
 //! ```
-//! A handful of convenience functions are designed to allow some of the most common conversions.
 //!
 //! It is possible to format the text layout in various ways beyond using markup.
-//! The most important option is how to align it: left, centred, or right.
-//!
-//! ```
-//! # use svgtextbox::SVGTextBox;
-//! extern crate pango;
-//!
-//! let left_aligned = SVGTextBox::new("Left", 100, 100)
-//!							.set_alignment_from_str("left");
-//! let also_left = SVGTextBox::new("Left", 100, 100)
-//!							.set_alignment(pango::Alignment::Left);
-//! let centre_aligned = SVGTextBox::new("Centre", 100, 100)
-//!							.set_alignment_from_str("centre");
-//! let right_aligned = SVGTextBox::new("Right", 100, 100)
-//!							.set_alignment_from_str("right");
-//! ```
 //! The typeface of the text, together with options like style and weight,
 //! can be set by using a `pango::FontDescription`.
 //! See the documentation for this for a full description; briefly, this can be set
@@ -97,6 +84,21 @@
 //! // [etc]
 //! let fancy = SVGTextBox::new("Fancy", 100, 100)
 //!							.set_font_desc(fancy_fd);
+//! ```
+//! Another important option is how to align the text: left, centred, or right.
+//!
+//! ```
+//! # use svgtextbox::SVGTextBox;
+//! extern crate pango;
+//!
+//! let left_aligned = SVGTextBox::new("Left", 100, 100)
+//!							.set_alignment_from_str("left");
+//! let also_left = SVGTextBox::new("Left", 100, 100)
+//!							.set_alignment(pango::Alignment::Left);
+//! let centre_aligned = SVGTextBox::new("Centre", 100, 100)
+//!							.set_alignment_from_str("centre");
+//! let right_aligned = SVGTextBox::new("Right", 100, 100)
+//!							.set_alignment_from_str("right");
 //! ```
 //! # Things to note
 //!
@@ -555,94 +557,93 @@ impl LayoutSizing for pango::Layout {
     }
 }
 
-/// Get a new `pango::Layout`. Public to allow bypassing the SVGTextBox struct.
-/// # Example usage.
-/// ```
-/// # use svgtextbox::{get_layout, LayoutError};
-/// 
-/// let font_desc = pango::FontDescription::from_string("Sans 10");
-/// // a static layout, where the text will be 10pts in size.
-/// let layout = get_layout("Hello World", 100, 100, &font_desc, pango::Alignment::Left, false).unwrap();
-/// // a flex layout, where the text will be whatever size is the largest that still fits.
-/// let layout = get_layout("Hello World", 100, 100, &font_desc, pango::Alignment::Left, true).unwrap();
-/// // Some basic checks will be conducted on input:
-/// let bad_layout = get_layout("\n", 100, 100, &font_desc, pango::Alignment::Left, false);
-/// assert_eq!(bad_layout.unwrap_err(), LayoutError::MarkupWhitespace);
-/// ```
-/// # Arguments
-/// * `markup`: the text to use, formatted in [Pango Markup Language](https://developer.gnome.org/pango/stable/PangoMarkupFormat.html) if desired.
-/// * `px_width`: the width of the layout, in pixels.
-/// * `height`: the height of the layout, in pixels.
-/// * `font_desc`: the `pango::FontDescription` to use in the layout. (This can be empty; if
-///   the layout is static without a font size, a default size will be set.)
-/// * `alignment`: the text alignment of the layout.
-/// * `grow`: whether or not to increase the layout font size to the maximum size that
-///    does not overflow boundaries.
-pub fn get_layout(
-    markup: &str,
-    px_width: i32,
-    px_height: i32,
-    font_desc: &pango::FontDescription,
-    alignment: pango::Alignment,
-    grow: bool,
-) -> Result<pango::Layout, LayoutError> {
-    let layout = pango::Layout::generate_from(markup, px_width, px_height, alignment, font_desc)?;
-    if grow {
-    	layout.grow_to_maximum_font_size()?;
-    } else {
-		if layout.font_size() <= 0 {
-        	layout.change_font_size(pango::Layout::DEFAULT_FONT_SIZE * pango::SCALE);
-    	}
-    	if !layout.fits() {
-        	return Err(LayoutError::StaticFontNoFit);
-    	}
-    }
-    Ok(layout)
+
+
+pub trait SVGTextboxOut {
+	fn as_bytes(&self) -> Result<Vec<u8>, LayoutError>;
+	fn as_embeddable_base64(&self) -> Result<String, LayoutError>;
+	fn as_string(&self) -> Result<String, LayoutError>;
+	fn to_file(&self, path: &str) -> Result<(), LayoutError>;
+	fn get_layout(markup: &str, px_width: i32, px_height: i32, font_desc: &pango::FontDescription, alignment: pango::Alignment, grow: bool) -> Result<pango::Layout, LayoutError>;
 }
 
-impl <'a>TryFrom<SVGTextBox<'a>> for pango::Layout {
-	type Error = LayoutError;
+impl <'a>SVGTextboxOut for SVGTextBox<'a> {
 
-	fn try_from(tb: SVGTextBox) -> Result<Self, Self::Error> {
-		get_layout(tb.markup, tb.width, tb.height, &tb.font_desc, tb.alignment, tb.grow)
+	/// Get a new `pango::Layout`.
+	/// # Example usage.
+	/// ```
+	/// # use svgtextbox::LayoutError;
+	/// # use svgtextbox::SVGTextboxOut::get_layout;
+	/// 
+	/// let font_desc = pango::FontDescription::from_string("Sans 10");
+	/// // a static layout, where the text will be 10pts in size.
+	/// let layout = get_layout("Hello World", 100, 100, &font_desc, pango::Alignment::Left, false).unwrap();
+	/// // a flex layout, where the text will be whatever size is the largest that still fits.
+	/// let layout = get_layout("Hello World", 100, 100, &font_desc, pango::Alignment::Left, true).unwrap();
+	/// // Some basic checks will be conducted on input:
+	/// let bad_layout = get_layout("\n", 100, 100, &font_desc, pango::Alignment::Left, false);
+	/// assert_eq!(bad_layout.unwrap_err(), LayoutError::MarkupWhitespace);
+	/// ```
+	/// # Arguments
+	/// * `markup`: the text to use, formatted in [Pango Markup Language](https://developer.gnome.org/pango/stable/PangoMarkupFormat.html) if desired.
+	/// * `px_width`: the width of the layout, in pixels.
+	/// * `height`: the height of the layout, in pixels.
+	/// * `font_desc`: the `pango::FontDescription` to use in the layout. (This can be empty; if
+	///   the layout is static without a font size, a default size will be set.)
+	/// * `alignment`: the text alignment of the layout.
+	/// * `grow`: whether or not to increase the layout font size to the maximum size that
+	///    does not overflow boundaries.
+	fn get_layout(
+	    markup: &str,
+	    px_width: i32,
+	    px_height: i32,
+	    font_desc: &pango::FontDescription,
+	    alignment: pango::Alignment,
+	    grow: bool,
+	) -> Result<pango::Layout, LayoutError> {
+	    let layout = pango::Layout::generate_from(markup, px_width, px_height, alignment, font_desc)?;
+	    if grow {
+	    	layout.grow_to_maximum_font_size()?;
+	    } else {
+			if layout.font_size() <= 0 {
+	        	layout.change_font_size(pango::Layout::DEFAULT_FONT_SIZE * pango::SCALE);
+	    	}
+	    	if !layout.fits() {
+	        	return Err(LayoutError::StaticFontNoFit);
+	    	}
+	    }
+	    Ok(layout)
 	}
-}
 
-impl <'a>TryFrom<SVGTextBox<'a>> for Vec<u8> {
-	type Error = LayoutError;
-
-	fn try_from(tb: SVGTextBox) -> Result<Self, Self::Error> {
-		let layout = pango::Layout::try_from(tb)?;
-		layout.as_bytes()
+	///Get a textbox rendered as a vector of bytes representing an svg.
+	fn as_bytes(&self) -> Result<Vec<u8>, LayoutError> {
+		let layout = Self::get_layout(self.markup, self.width, self.height, &self.font_desc, self.alignment, self.grow)?;
+		let as_bytes = layout.as_bytes()?;
+		Ok(as_bytes)
 	}
-}
 
-///Get a textbox rendered as a vector of bytes representing an svg.
-pub fn svg_bytes(tb: SVGTextBox) -> Result<Vec<u8>, LayoutError> {
-	let as_bytes = Vec::<u8>::try_from(tb)?;
-	Ok(as_bytes)
-}
+	///Get a textbox rendered as a base64 string with the appropriate prefix for
+	/// inclusion in other svgs.
+	fn as_embeddable_base64(&self) -> Result<String, LayoutError> {
+		let as_bytes = self.as_bytes()?;
+		let as_b64 = base64::encode(&as_bytes);
+		Ok(format!("data:image/svg;base64, {}", as_b64))
+	}
 
-///Get a textbox rendered as a base64 string with the appropriate prefix for
-/// inclusion in other svgs.
-pub fn embeddable_base64_svg(tb: SVGTextBox) -> Result<String, LayoutError> {
-	let as_bytes = svg_bytes(tb)?;
-	let as_b64 = base64::encode(&as_bytes);
-	Ok(format!("data:image/svg;base64, {}", as_b64))
-}
+	/// Get a textbox as a string.
+	fn as_string(&self) -> Result<String, LayoutError> {
+		let as_bytes = self.as_bytes()?;
+		let s = str::from_utf8(&as_bytes)?;
+		Ok(s.to_string())
+	}
 
-/// Get a textbox as a string.
-pub fn svg_string(tb: SVGTextBox) -> Result<String, LayoutError> {
-	let as_bytes = svg_bytes(tb)?;
-	let s = str::from_utf8(&as_bytes)?;
-	Ok(s.to_string())
-}
+	/// Write textbox as an svg file to path.
+	fn to_file(&self, path: &str) -> Result<(), LayoutError> {
+		let as_bytes = self.as_bytes()?;
+		std::fs::write(path, as_bytes)?;
+		Ok(())
+	}
 
-/// Write textbox as an svg file to path.
-pub fn svg_to_file(tb: SVGTextBox, path: &str) -> Result<(), LayoutError> {
-	let as_bytes = svg_bytes(tb)?;
-	std::fs::write(path, as_bytes)?;
-	Ok(())
 }
 
 
@@ -830,7 +831,7 @@ mod tests {
     #[test]
     fn test_get_static_layout() {
         let markup = "Hello World";
-        let r = get_layout(
+        let r = SVGTextBox::get_layout(
             markup,
             100,
             100,
@@ -851,7 +852,7 @@ mod tests {
         let mut font_desc = pango::FontDescription::new();
         let twelve_pt = 12 * pango::SCALE;
         font_desc.set_size(twelve_pt);
-        let r = get_layout(markup, 100, 100, &font_desc, pango::Alignment::Left, false).unwrap();
+        let r = SVGTextBox::get_layout(markup, 100, 100, &font_desc, pango::Alignment::Left, false).unwrap();
         assert_eq!(r.font_size(), twelve_pt);
     }
 
@@ -861,13 +862,13 @@ mod tests {
         let mut font_desc = pango::FontDescription::new();
         let large_pt = 120 * pango::SCALE;
         font_desc.set_size(large_pt);
-        let l = get_layout(markup, 100, 100, &font_desc, pango::Alignment::Left, false);
+        let l = SVGTextBox::get_layout(markup, 100, 100, &font_desc, pango::Alignment::Left, false);
         assert_eq!(l.unwrap_err(), LayoutError::StaticFontNoFit);
     }
 
     #[test]
     fn test_get_flex_layout() {
-        let r = get_layout(
+        let r = SVGTextBox::get_layout(
             "Hello World",
             100,
             100,
@@ -922,7 +923,7 @@ mod tests {
         #[test]
         fn no_crashes(markup in ".*", height in prop::num::i32::ANY, width in prop::num::i32::ANY, alignment in alignment(), grow in prop::bool::ANY) {
             let font_desc = pango::FontDescription::new();
-            let _r = get_layout(&markup, width, height, &font_desc, alignment, grow);
+            let _r = SVGTextBox::get_layout(&markup, width, height, &font_desc, alignment, grow);
         }
     }
 
