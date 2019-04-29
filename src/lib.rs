@@ -627,7 +627,7 @@ impl <'a>SVGTextboxOut for SVGTextBox<'a> {
 	fn as_embeddable_base64(&self) -> Result<String, LayoutError> {
 		let as_bytes = self.as_bytes()?;
 		let as_b64 = base64::encode(&as_bytes);
-		Ok(format!("data:image/svg;base64, {}", as_b64))
+		Ok(format!("data:image/svg+xml;base64, {}", as_b64))
 	}
 
 	/// Get a textbox as a string.
