@@ -114,7 +114,7 @@
 //! 	but still enough using this as a long-running program a bad idea.
 //! * Text will not be set to a base size of more than 500 pts.
 //! 	There's no particular reason for this number, but some limit was required, and that's high enough to not be a problem generally.
-//!		(Similarly, you can't specify a width or height greater that std::i32::MAX / pango::SCALE, but if I found that to be a problem I would
+//!		(Similarly, you can't specify a width or height greater than std::i32::MAX / pango::SCALE, but if I found that to be a problem I would
 //!		rethink my strategies.)
 extern crate pango;
 use pango::FontMapExt;
@@ -285,7 +285,6 @@ impl<'a> SVGTextBox<'a> {
     /// // For example, to have left-aligned text set in italic Times New Roman:
     ///
     /// let times_new_roman_italic = pango::FontDescription::from_string("Times New Roman italic");
-    /// let times_new_roman = pango::FontDescription::from_string("Times New Roman");
     /// tb.set_alignment_from_str("left");
     ///	tb.set_font_desc(times_new_roman_italic);
     ///
@@ -293,7 +292,7 @@ impl<'a> SVGTextBox<'a> {
     ///
     /// let tb = SVGTextBox::new("Hello World", 100, 100)
     ///						.set_alignment_from_str("left")
-    ///						.set_font_desc(times_new_roman);
+    ///						.set_font_desc(times_new_roman_italic);
     /// ```
     /// # Arguments
     ///
