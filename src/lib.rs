@@ -69,21 +69,28 @@
 //! ```
 //! extern crate pango;
 //! # use svgtextbox::SVGTextBox;
+//! # use svgtextbox::get_font_description;
 //! // The simplest way to create a font description.
 //! let font_eg = "Minion Pro bold italic 10";
-//!	
+//!
 //! let eg = SVGTextBox::new("This text will be set in bold italic Minion Pro at size 10", 500, 100)
 //!						.set_font_desc_from_str(font_eg).unwrap()
 //!						.set_static();
 //!
-//! // More complicated font descriptions are possible by setting a FontDescription directly. 
+//! // More complicated font descriptions are possible by setting a FontDescription directly.
+//! // A font description can be created using pango directly, but a convenience function is also available
+//! // to create a FontDescription from optional strs; `eg2` below is the same as `eg`.
 //!
-//! let mut fancy_fd = pango::FontDescription::new();
-//! fancy_fd.set_size(10 * pango::SCALE); // nb
-//! fancy_fd.set_weight(pango::Weight::Book);
-//! // [etc]
-//! let fancy = SVGTextBox::new("Fancy", 100, 100)
-//!							.set_font_desc(fancy_fd);
+//! let family = Some("Minion Pro");
+//! let style = Some("italic");
+//! let weight = Some("bold");
+//! let mut fd = get_font_description(family, weight, style);
+//! fd.set_size(10 * pango::SCALE);
+//!
+//! let eg2 = SVGTextBox::new("This text will be set in bold italic Minion Pro at size 10", 500, 100)
+//!						.set_font_desc(fd)
+//!						.set_static();
+//!
 //! ```
 //! Another important option is how to align the text: left, centred, or right.
 //!
@@ -112,6 +119,7 @@
 extern crate pango;
 use pango::FontMapExt;
 use pango::LayoutExt;
+use pango::Weight;
 extern crate cairo;
 use cairo::prelude::*;
 extern crate pangocairo;
@@ -122,27 +130,26 @@ extern crate glib;
 use glib::translate::*;
 use pango_sys;
 use std::mem;
-use std::convert::TryFrom;
 extern crate custom_error;
 use custom_error::custom_error;
 
-custom_error!{
-	/// The various errors we can encounter. These should be the only
-	/// errors returned.
-	/// * `MarkupTooLong`: Returned when markup is too long.
-	/// * `MarkupNullChar`: Returned if markup contains '\u{00}' or '\u{0}'.
-	/// * `MarkupWhitespace`: Returned if markup is empty or contains only whitespace.
-	/// * `BadMarkup`: Returned if pango raises a warning when parsing markup.
-	/// * `Distance`: Returned if a distance (width or height) of the layout is inappropriate.
-	/// * `WidthNotSet`: Returned when trying to convert a layout without a set width.
-	/// * `HeightNotSet`: Returned when trying to convert a layout without a set height.
-	/// * `MinFontSize`: Returned when markup would not fit within a layout even at the minimum font size. 
-	/// * `StaticFontNoFit`: Returned when markup would not fit within a static layout at its set font size (or the default font size if no size was set).
-	/// * `FontDescriptionStr`: Returned when attempting to create a font description from an invalid string.
-	/// * `Utf8Error`: Wrapper for `std::str::Utf8Error`.
-	/// * `Io`: Wrapper for `std::io::Error`.
-	#[derive(PartialEq)]
-	pub LayoutError
+custom_error! {
+    /// The various errors we can encounter. These should be the only
+    /// errors returned.
+    /// * `MarkupTooLong`: Returned when markup is too long.
+    /// * `MarkupNullChar`: Returned if markup contains '\u{00}' or '\u{0}'.
+    /// * `MarkupWhitespace`: Returned if markup is empty or contains only whitespace.
+    /// * `BadMarkup`: Returned if pango raises a warning when parsing markup.
+    /// * `Distance`: Returned if a distance (width or height) of the layout is inappropriate.
+    /// * `WidthNotSet`: Returned when trying to convert a layout without a set width.
+    /// * `HeightNotSet`: Returned when trying to convert a layout without a set height.
+    /// * `MinFontSize`: Returned when markup would not fit within a layout even at the minimum font size.
+    /// * `StaticFontNoFit`: Returned when markup would not fit within a static layout at its set font size (or the default font size if no size was set).
+    /// * `FontDescriptionStr`: Returned when attempting to create a font description from an invalid string.
+    /// * `Utf8Error`: Wrapper for `std::str::Utf8Error`.
+    /// * `Io`: Wrapper for `std::io::Error`.
+    #[derive(PartialEq)]
+    pub LayoutError
     MarkupTooLong = "Markup is too long",
     MarkupNullChar = "Markup contains a null char",
     MarkupWhitespace = "Markup is only whitespace or empty",
@@ -158,146 +165,228 @@ custom_error!{
 }
 
 impl std::convert::From<std::str::Utf8Error> for LayoutError {
-	fn from(error: std::str::Utf8Error) -> Self {
-		LayoutError::Utf8Error{msg: error.to_string()}
-	}
+    fn from(error: std::str::Utf8Error) -> Self {
+        LayoutError::Utf8Error {
+            msg: error.to_string(),
+        }
+    }
 }
 
 impl std::convert::From<std::io::Error> for LayoutError {
-	fn from(error: std::io::Error) -> Self {
-		LayoutError::Io{msg: error.to_string()}
-	}
+    fn from(error: std::io::Error) -> Self {
+        LayoutError::Io {
+            msg: error.to_string(),
+        }
+    }
 }
 
+/// A little wrapper to construct pango::FontDescriptions from optional strs
+/// rather than having to import pango directly in clients.
+///```
+///	# use svgtextbox::get_font_description;
+///	let fd = get_font_description(Some("Open Sans"), Some("700"), None);
+///	let fd2 = get_font_description(Some("Open Sans"), Some("bold"), None);
+///	assert_eq!(fd, fd2);
+///```
+/// # Arguments
+///
+/// * `family`: the font family to use
+/// * `weight`: the font weight to use. This can be specified either
+///            as a numeric string, or as a common name.
+///			   For example, a bold font could be specified as either
+///			   "700" or "bold". Unrecognised names or weights
+///				are treated as a normal weight (400).
+///				Note that available weights are more numerous
+///				than css weights, but that many fonts will not support all possible weights.
+/// * `style`: the style of the font: normal, italic or oblique.
+///				Any string that is not "italic" or "oblique" will be treated as specifying regular style.
+///
+pub fn get_font_description(
+    family: Option<&str>,
+    weight: Option<&str>,
+    style: Option<&str>,
+) -> pango::FontDescription {
+    FontDescriptionStrings {
+        family,
+        weight,
+        style,
+    }
+    .to_font_desc()
+}
+
+struct FontDescriptionStrings<'a> {
+    family: Option<&'a str>,
+    weight: Option<&'a str>,
+    style: Option<&'a str>,
+}
+
+impl<'a> FontDescriptionStrings<'a> {
+    fn to_font_desc(&self) -> pango::FontDescription {
+        let mut font_desc = pango::FontDescription::new();
+        if let Some(ff) = self.family {
+            font_desc.set_family(ff);
+        };
+        if let Some(w) = self.weight {
+            let weight = FontDescriptionStrings::str_to_weight(w);
+            font_desc.set_weight(weight);
+        };
+        if let Some(s) = self.style {
+            let style = FontDescriptionStrings::str_to_style(s);
+            font_desc.set_style(style);
+        };
+        font_desc
+    }
+
+    pub fn str_to_weight(s: &str) -> pango::Weight {
+        match s {
+            "100" | "thin" | "hairline" => Weight::Thin,
+            "200" | "ultralight" | "extralight" => Weight::Ultralight,
+            "300" | "light" => Weight::Light,
+            "350" | "semilight" => Weight::Semilight,
+            "380" | "book" => Weight::Book,
+            "400" | "normal" => Weight::Normal,
+            "500" | "medium" => Weight::Medium,
+            "600" | "semibold" | "demibold" => Weight::Semibold,
+            "700" | "bold" => Weight::Bold,
+            "800" | "ultrabold" | "extrabold" => Weight::Ultrabold,
+            "900" | "black" | "heavy" => Weight::Heavy,
+            "1000" | "ultraheavy" => Weight::Ultraheavy,
+            _ => Weight::Normal,
+        }
+    }
+
+    pub fn str_to_style(s: &str) -> pango::Style {
+        match s {
+            "oblique" => pango::Style::Oblique,
+            "italic" => pango::Style::Italic,
+            _ => pango::Style::Normal,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub struct SVGTextBox<'a> {
-	markup: &'a str,
-	width: i32,
-	height: i32,
-	font_desc: pango::FontDescription,
-	alignment: pango::Alignment,
-	grow: bool,
+    markup: &'a str,
+    width: i32,
+    height: i32,
+    font_desc: pango::FontDescription,
+    alignment: pango::Alignment,
+    grow: bool,
 }
 
+impl<'a> SVGTextBox<'a> {
+    /// Generate a new textbox from the options given.
+    ///
+    /// ```
+    /// # use svgtextbox::SVGTextBox;
+    /// let mut tb = SVGTextBox::new("Hello World", 100, 100);
+    ///
+    /// // Further options can be given by chaining method calls together.
+    /// // For example, to have left-aligned text set in italic Times New Roman:
+    ///
+    /// let times_new_roman_italic = pango::FontDescription::from_string("Times New Roman italic");
+    /// let times_new_roman = pango::FontDescription::from_string("Times New Roman");
+    /// tb.set_alignment_from_str("left");
+    ///	tb.set_font_desc(times_new_roman_italic);
+    ///
+    /// // Alternatively, these can be combined into one without requiring the textbox to be mutable:
+    ///
+    /// let tb = SVGTextBox::new("Hello World", 100, 100)
+    ///						.set_alignment_from_str("left")
+    ///						.set_font_desc(times_new_roman);
+    /// ```
+    /// # Arguments
+    ///
+    /// * `markup`: the text to use, formatted in [Pango Markup Language](https://developer.gnome.org/pango/stable/PangoMarkupFormat.html) if desired.
+    /// * `width`: the width of the eventual image, in pixels.
+    /// * `height`: the height of the eventual image, in pixels.
+    ///
+    pub fn new(markup: &str, px_width: i32, px_height: i32) -> SVGTextBox {
+        SVGTextBox {
+            markup,
+            width: px_width,
+            height: px_height,
+            font_desc: pango::FontDescription::new(),
+            alignment: pango::Alignment::Center,
+            grow: true,
+        }
+    }
 
-impl <'a>SVGTextBox<'a> {
+    /// Set how text should be aligned.
+    /// # Arguments
+    /// * `a`: can be any of "left", "centre", "center", and "right". Any other string will result in centre-aligned text.
+    ///
+    /// ```
+    /// # use svgtextbox::SVGTextBox;
+    /// let mut tb = SVGTextBox::new("Hello World", 100, 100);
+    /// tb.set_alignment_from_str("centre");
+    /// ```
+    pub fn set_alignment_from_str(&mut self, alignment_str: &str) -> &mut SVGTextBox<'a> {
+        let alignment = match alignment_str {
+            "left" => pango::Alignment::Left,
+            "centre" | "center" => pango::Alignment::Center,
+            "right" => pango::Alignment::Right,
+            // might as well not panic
+            _ => pango::Alignment::Center,
+        };
+        self.set_alignment(alignment)
+    }
 
+    /// Set how text should be aligned, using a `pango::Alignment` directly.
+    ///
+    /// ```
+    /// # use svgtextbox::SVGTextBox;
+    /// let mut tb = SVGTextBox::new("Hello World", 100, 100);
+    /// tb.set_alignment(pango::Alignment::Right);
+    /// ```
+    pub fn set_alignment(&mut self, a: pango::Alignment) -> &mut SVGTextBox<'a> {
+        self.alignment = a;
+        self
+    }
 
-	/// Generate a new textbox from the options given.
-	///
-	/// ```
-	/// # use svgtextbox::SVGTextBox;
-	/// let mut tb = SVGTextBox::new("Hello World", 100, 100);
-	///
-	/// // Further options can be given by chaining method calls together.
-	/// // For example, to have left-aligned text set in italic Times New Roman:
-	///
-	/// let times_new_roman_italic = pango::FontDescription::from_string("Times New Roman italic");
-	/// let times_new_roman = pango::FontDescription::from_string("Times New Roman");
-	/// tb.set_alignment_from_str("left");
-	///	tb.set_font_desc(times_new_roman_italic);
-	///
-	/// // Alternatively, these can be combined into one without requiring the textbox to be mutable: 
-	/// 
-	/// let tb = SVGTextBox::new("Hello World", 100, 100)
-	///						.set_alignment_from_str("left")
-	///						.set_font_desc(times_new_roman);
-	/// ```
-	/// # Arguments
-	///
-	/// * `markup`: the text to use, formatted in [Pango Markup Language](https://developer.gnome.org/pango/stable/PangoMarkupFormat.html) if desired.
-	/// * `width`: the width of the eventual image, in pixels.
-	/// * `height`: the height of the eventual image, in pixels.
-	///
-	pub fn new(markup: &str, px_width: i32, px_height: i32) -> SVGTextBox {
-		SVGTextBox {
-			markup: markup,
-			width: px_width,
-			height: px_height,
-			font_desc: pango::FontDescription::new(),
-			alignment: pango::Alignment::Center,
-			grow: true
-		}
-	}
+    /// Set the font using a descriptive string.
+    /// ```
+    /// # use svgtextbox::SVGTextBox;
+    /// let mut tb = SVGTextBox::new("Hello World", 100, 100);
+    /// tb.set_font_desc_from_str("Times New Roman").unwrap();
+    /// // The above is the equivalent of
+    /// let fd = pango::FontDescription::from_string("Times New Roman");
+    /// tb.set_font_desc(fd);
+    /// ```
+    pub fn set_font_desc_from_str(&mut self, fd: &str) -> Result<&mut SVGTextBox<'a>, LayoutError> {
+        let fd_parsed = pango::Layout::check_whitespace(fd);
+        match fd_parsed {
+            Ok(_) => Ok(self.set_font_desc(pango::FontDescription::from_string(fd))),
+            Err(_) => Err(LayoutError::FontDescriptionStr),
+        }
+    }
 
-	/// Set how text should be aligned.
-	/// # Arguments
-	/// * `a`: can be any of "left", "centre", "center", and "right". Any other string will result in centre-aligned text.
-	///
-	/// ```
-	/// # use svgtextbox::SVGTextBox;
-	/// let mut tb = SVGTextBox::new("Hello World", 100, 100);
-	/// tb.set_alignment_from_str("centre");
-	/// ```
-	pub fn set_alignment_from_str(&mut self, alignment_str: &str) -> &mut SVGTextBox<'a> {
-		let alignment = match alignment_str {
-	        "left" => pango::Alignment::Left,
-	        "centre" | "center" => pango::Alignment::Center,
-	        "right" => pango::Alignment::Right,
-	        // might as well not panic
-	        _ => pango::Alignment::Center,
-    	};
-		self.set_alignment(alignment)
-	}
+    /// Set a new font description.
+    /// ```
+    /// # use svgtextbox::SVGTextBox;
+    /// let mut tb = SVGTextBox::new("Hello World", 100, 100);
+    /// let fd = pango::FontDescription::from_string("Serif");
+    /// tb.set_font_desc(fd);
+    /// ```
+    pub fn set_font_desc(&mut self, fd: pango::FontDescription) -> &mut SVGTextBox<'a> {
+        self.font_desc = fd;
+        self
+    }
 
-
-	/// Set how text should be aligned, using a `pango::Alignment` directly.
-	///
-	/// ```
-	/// # use svgtextbox::SVGTextBox;
-	/// let mut tb = SVGTextBox::new("Hello World", 100, 100);
-	/// tb.set_alignment(pango::Alignment::Right);
-	/// ```
-	pub fn set_alignment(&mut self, a: pango::Alignment) -> &mut SVGTextBox<'a> {
-		self.alignment = a;
-		self
-	}
-
-	/// Set the font using a descriptive string.
-	/// ```
-	/// # use svgtextbox::SVGTextBox;
-	/// let mut tb = SVGTextBox::new("Hello World", 100, 100);
-	/// tb.set_font_desc_from_str("Times New Roman").unwrap();
-	/// // The above is the equivalent of
-	/// let fd = pango::FontDescription::from_string("Times New Roman");
-	/// tb.set_font_desc(fd);
-	/// ```
-	pub fn set_font_desc_from_str(&mut self, fd: &str) -> Result<&mut SVGTextBox<'a>, LayoutError> {
-		let fd_parsed = pango::Layout::check_whitespace(fd);
-		match fd_parsed {
-			Ok(_) =>  Ok(self.set_font_desc(pango::FontDescription::from_string(fd))),
-			Err(_) => Err(LayoutError::FontDescriptionStr),
-		}
-	}
-
-	/// Set a new font description.
-	/// ```
-	/// # use svgtextbox::SVGTextBox;
-	/// let mut tb = SVGTextBox::new("Hello World", 100, 100);
-	/// let fd = pango::FontDescription::from_string("Serif");
-	/// tb.set_font_desc(fd);
-	/// ```
-	pub fn set_font_desc(&mut self, fd: pango::FontDescription) -> &mut SVGTextBox<'a> {
-		self.font_desc = fd;
-		self
-	}
-
-	/// Do _not_ grow or shrink text, but keep it at its original size.
-	/// ```
-	/// # use svgtextbox::SVGTextBox;
-	/// // "Hello World" will grow to fit.
-	/// let tb = SVGTextBox::new("Hello World", 100, 100);
-	/// 
-	/// // "Hello World" will be set in 10 point Sans.
-	/// let static_tb = SVGTextBox::new("Hello World", 100, 100).set_font_desc_from_str("Sans 10").unwrap().set_static();
-	/// ```
-	pub fn set_static(&mut self) -> & mut SVGTextBox<'a> {
-		self.grow = false;
-		self
-	}
-
+    /// Do _not_ grow or shrink text, but keep it at its original size.
+    /// ```
+    /// # use svgtextbox::SVGTextBox;
+    /// // "Hello World" will grow to fit.
+    /// let tb = SVGTextBox::new("Hello World", 100, 100);
+    ///
+    /// // "Hello World" will be set in 10 point Sans.
+    /// let static_tb = SVGTextBox::new("Hello World", 100, 100).set_font_desc_from_str("Sans 10").unwrap().set_static();
+    /// ```
+    pub fn set_static(&mut self) -> &mut SVGTextBox<'a> {
+        self.grow = false;
+        self
+    }
 }
-
-
 
 trait LayoutBase {
     const MAX_MARKUP_LEN: i32 = 1000;
@@ -321,7 +410,6 @@ trait LayoutBase {
 }
 
 impl LayoutBase for pango::Layout {
-    
     /// Return the distance in pango units that would need to be
     /// moved down so that the ink extents of the layout appear vertically
     /// centred.
@@ -383,7 +471,7 @@ impl LayoutBase for pango::Layout {
             return Err(LayoutError::MarkupWhitespace);
         }
         if m.contains(Self::NULL_CHAR) | m.contains(Self::ACCEL_MARKER) {
-        	return Err(LayoutError::MarkupNullChar);
+            return Err(LayoutError::MarkupNullChar);
         }
         Ok(())
     }
@@ -391,7 +479,7 @@ impl LayoutBase for pango::Layout {
     /// Check markup for errors. Return the input if there are no errors.
     /// If errors are fixable, return a string
     /// with the appropriate changes made. Otherwise, return a `LayoutError`
-    /// specifying the problem. 
+    /// specifying the problem.
     fn check_markup(initial_markup: &str) -> Result<String, LayoutError> {
         // check length
         let mut markup = initial_markup.trim().to_string();
@@ -416,7 +504,9 @@ impl LayoutBase for pango::Layout {
         let experimental_parse = pango::parse_markup(&markup, Self::ACCEL_MARKER);
         match experimental_parse {
             Ok(_) => Ok(markup),
-            Err(pango_err) => Err(LayoutError::BadMarkup {msg: pango_err.to_string()}),
+            Err(pango_err) => Err(LayoutError::BadMarkup {
+                msg: pango_err.to_string(),
+            }),
         }
     }
 
@@ -424,25 +514,21 @@ impl LayoutBase for pango::Layout {
     /// Returns the default font description's size (0) if
     /// no font description has been set.
     fn font_size(&self) -> i32 {
-    	self.get_font_description().unwrap_or_default().get_size()
+        self.get_font_description().unwrap_or_default().get_size()
     }
 }
-
 
 trait LayoutOutput {
     fn as_bytes(&self) -> Result<Vec<u8>, LayoutError>;
 }
 
 impl LayoutOutput for pango::Layout {
-    
     /// return this layout as a vector of bytes representing
     /// a svg file.
     fn as_bytes(&self) -> Result<Vec<u8>, LayoutError> {
         // we need height and width to be set
 
-        let unscaled_pts = |x: i32| -> f64 {
-            f64::from(x) / f64::from(pango::SCALE)
-        };
+        let unscaled_pts = |x: i32| -> f64 { f64::from(x) / f64::from(pango::SCALE) };
 
         let width = match self.get_width() {
             w if w > 0 => unscaled_pts(w),
@@ -481,14 +567,15 @@ impl LayoutSizing for pango::Layout {
     /// and no text or part of text ink extents are
     /// outside the box.
     /// It is important to note that this relies on Pango's
-    /// reporting, which is _not_ necessarily reliable.
+    /// reporting, which is _not_ necessarily reliable
+    /// when multiple paragraphs are involved.
     /// Further, more intensive, checks are required to be sure.
     fn fits(&self) -> bool {
         let ellipsized = self.is_ellipsized();
         let (ink_extents, _) = self.get_extents();
         let northwest_bounds_exceeded = (ink_extents.x < 0) | (ink_extents.y < 0);
         let southeast_bounds_exceeded = ((ink_extents.height + ink_extents.y) > self.get_height())
-        						  		| ((ink_extents.width + ink_extents.x) > self.get_width());
+            | ((ink_extents.width + ink_extents.x) > self.get_width());
 
         !(ellipsized | northwest_bounds_exceeded | southeast_bounds_exceeded)
     }
@@ -516,8 +603,7 @@ impl LayoutSizing for pango::Layout {
     /// This will not override the sizes set in the original
     /// pango markup.
     fn change_font_size(&self, new_font_size: i32) {
-        let mut font_desc: pango::FontDescription =
-            self.get_font_description().unwrap_or_default();
+        let mut font_desc: pango::FontDescription = self.get_font_description().unwrap_or_default();
         font_desc.set_size(new_font_size);
         self.set_font_description(&font_desc);
     }
@@ -532,9 +618,10 @@ impl LayoutSizing for pango::Layout {
             // lines are disappearing off the bottom.
             // here we check this by seeing if the index of the last
             // visible grapheme is the same as it was in the beginning.
-            match self.fits() & (self.last_char_index() == orig_last_char) {
-            	true => std::cmp::Ordering::Less,
-            	false => std::cmp::Ordering::Greater,
+            if self.fits() & (self.last_char_index() == orig_last_char) {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Greater
             }
         };
 
@@ -557,102 +644,112 @@ impl LayoutSizing for pango::Layout {
     }
 }
 
-
-
 pub trait SVGTextboxOut {
-	fn as_bytes(&self) -> Result<Vec<u8>, LayoutError>;
-	fn as_embeddable_base64(&self) -> Result<String, LayoutError>;
-	fn as_string(&self) -> Result<String, LayoutError>;
-	fn to_file(&self, path: &str) -> Result<(), LayoutError>;
-	fn get_layout(markup: &str, px_width: i32, px_height: i32, font_desc: &pango::FontDescription, alignment: pango::Alignment, grow: bool) -> Result<pango::Layout, LayoutError>;
+    fn as_bytes(&self) -> Result<Vec<u8>, LayoutError>;
+    fn as_embeddable_base64(&self) -> Result<String, LayoutError>;
+    fn as_string(&self) -> Result<String, LayoutError>;
+    fn to_file(&self, path: &str) -> Result<(), LayoutError>;
+    fn get_layout(
+        markup: &str,
+        px_width: i32,
+        px_height: i32,
+        font_desc: &pango::FontDescription,
+        alignment: pango::Alignment,
+        grow: bool,
+    ) -> Result<pango::Layout, LayoutError>;
 }
 
-impl <'a>SVGTextboxOut for SVGTextBox<'a> {
+impl<'a> SVGTextboxOut for SVGTextBox<'a> {
+    /// Get a new `pango::Layout`.
+    /// # Example usage.
+    /// ```
+    /// # use svgtextbox::LayoutError;
+    /// # use svgtextbox::SVGTextBox;
+    /// # use svgtextbox::SVGTextboxOut;
+    ///
+    /// let font_desc = pango::FontDescription::from_string("Sans 10");
+    /// // a static layout, where the text will be 10pts in size.
+    /// let layout = SVGTextBox::get_layout("Hello World", 100, 100, &font_desc, pango::Alignment::Left, false).unwrap();
+    /// // a flex layout, where the text will be whatever size is the largest that still fits.
+    /// let layout = SVGTextBox::get_layout("Hello World", 100, 100, &font_desc, pango::Alignment::Left, true).unwrap();
+    /// // Some basic checks will be conducted on input:
+    /// let bad_layout = SVGTextBox::get_layout("\n", 100, 100, &font_desc, pango::Alignment::Left, false);
+    /// assert_eq!(bad_layout.unwrap_err(), LayoutError::MarkupWhitespace);
+    /// ```
+    /// # Arguments
+    /// * `markup`: the text to use, formatted in [Pango Markup Language](https://developer.gnome.org/pango/stable/PangoMarkupFormat.html) if desired.
+    /// * `px_width`: the width of the layout, in pixels.
+    /// * `height`: the height of the layout, in pixels.
+    /// * `font_desc`: the `pango::FontDescription` to use in the layout. (This can be empty; if
+    ///   the layout is static without a font size, a default size will be set.)
+    /// * `alignment`: the text alignment of the layout.
+    /// * `grow`: whether or not to increase the layout font size to the maximum size that
+    ///    does not overflow boundaries.
+    fn get_layout(
+        markup: &str,
+        px_width: i32,
+        px_height: i32,
+        font_desc: &pango::FontDescription,
+        alignment: pango::Alignment,
+        grow: bool,
+    ) -> Result<pango::Layout, LayoutError> {
+        let layout =
+            pango::Layout::generate_from(markup, px_width, px_height, alignment, font_desc)?;
+        if grow {
+            layout.grow_to_maximum_font_size()?;
+        } else {
+            if layout.font_size() <= 0 {
+                layout.change_font_size(pango::Layout::DEFAULT_FONT_SIZE * pango::SCALE);
+            }
+            if !layout.fits() {
+                return Err(LayoutError::StaticFontNoFit);
+            }
+        }
+        Ok(layout)
+    }
 
-	/// Get a new `pango::Layout`.
-	/// # Example usage.
-	/// ```
-	/// # use svgtextbox::LayoutError;
-	/// # use svgtextbox::SVGTextboxOut::get_layout;
-	/// 
-	/// let font_desc = pango::FontDescription::from_string("Sans 10");
-	/// // a static layout, where the text will be 10pts in size.
-	/// let layout = get_layout("Hello World", 100, 100, &font_desc, pango::Alignment::Left, false).unwrap();
-	/// // a flex layout, where the text will be whatever size is the largest that still fits.
-	/// let layout = get_layout("Hello World", 100, 100, &font_desc, pango::Alignment::Left, true).unwrap();
-	/// // Some basic checks will be conducted on input:
-	/// let bad_layout = get_layout("\n", 100, 100, &font_desc, pango::Alignment::Left, false);
-	/// assert_eq!(bad_layout.unwrap_err(), LayoutError::MarkupWhitespace);
-	/// ```
-	/// # Arguments
-	/// * `markup`: the text to use, formatted in [Pango Markup Language](https://developer.gnome.org/pango/stable/PangoMarkupFormat.html) if desired.
-	/// * `px_width`: the width of the layout, in pixels.
-	/// * `height`: the height of the layout, in pixels.
-	/// * `font_desc`: the `pango::FontDescription` to use in the layout. (This can be empty; if
-	///   the layout is static without a font size, a default size will be set.)
-	/// * `alignment`: the text alignment of the layout.
-	/// * `grow`: whether or not to increase the layout font size to the maximum size that
-	///    does not overflow boundaries.
-	fn get_layout(
-	    markup: &str,
-	    px_width: i32,
-	    px_height: i32,
-	    font_desc: &pango::FontDescription,
-	    alignment: pango::Alignment,
-	    grow: bool,
-	) -> Result<pango::Layout, LayoutError> {
-	    let layout = pango::Layout::generate_from(markup, px_width, px_height, alignment, font_desc)?;
-	    if grow {
-	    	layout.grow_to_maximum_font_size()?;
-	    } else {
-			if layout.font_size() <= 0 {
-	        	layout.change_font_size(pango::Layout::DEFAULT_FONT_SIZE * pango::SCALE);
-	    	}
-	    	if !layout.fits() {
-	        	return Err(LayoutError::StaticFontNoFit);
-	    	}
-	    }
-	    Ok(layout)
-	}
+    ///Get a textbox rendered as a vector of bytes representing an svg.
+    fn as_bytes(&self) -> Result<Vec<u8>, LayoutError> {
+        let layout = Self::get_layout(
+            self.markup,
+            self.width,
+            self.height,
+            &self.font_desc,
+            self.alignment,
+            self.grow,
+        )?;
+        let as_bytes = layout.as_bytes()?;
+        Ok(as_bytes)
+    }
 
-	///Get a textbox rendered as a vector of bytes representing an svg.
-	fn as_bytes(&self) -> Result<Vec<u8>, LayoutError> {
-		let layout = Self::get_layout(self.markup, self.width, self.height, &self.font_desc, self.alignment, self.grow)?;
-		let as_bytes = layout.as_bytes()?;
-		Ok(as_bytes)
-	}
+    ///Get a textbox rendered as a base64 string with the appropriate prefix for
+    /// inclusion in other svgs.
+    fn as_embeddable_base64(&self) -> Result<String, LayoutError> {
+        let as_bytes = self.as_bytes()?;
+        let as_b64 = base64::encode(&as_bytes);
+        Ok(format!("data:image/svg+xml;base64, {}", as_b64))
+    }
 
-	///Get a textbox rendered as a base64 string with the appropriate prefix for
-	/// inclusion in other svgs.
-	fn as_embeddable_base64(&self) -> Result<String, LayoutError> {
-		let as_bytes = self.as_bytes()?;
-		let as_b64 = base64::encode(&as_bytes);
-		Ok(format!("data:image/svg+xml;base64, {}", as_b64))
-	}
+    /// Get a textbox as a string.
+    fn as_string(&self) -> Result<String, LayoutError> {
+        let as_bytes = self.as_bytes()?;
+        let s = str::from_utf8(&as_bytes)?;
+        Ok(s.to_string())
+    }
 
-	/// Get a textbox as a string.
-	fn as_string(&self) -> Result<String, LayoutError> {
-		let as_bytes = self.as_bytes()?;
-		let s = str::from_utf8(&as_bytes)?;
-		Ok(s.to_string())
-	}
-
-	/// Write textbox as an svg file to path.
-	fn to_file(&self, path: &str) -> Result<(), LayoutError> {
-		let as_bytes = self.as_bytes()?;
-		std::fs::write(path, as_bytes)?;
-		Ok(())
-	}
-
+    /// Write textbox as an svg file to path.
+    fn to_file(&self, path: &str) -> Result<(), LayoutError> {
+        let as_bytes = self.as_bytes()?;
+        std::fs::write(path, as_bytes)?;
+        Ok(())
+    }
 }
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     // tests for layout base.
-
 
     #[test]
     fn test_layout_generate_from() {
@@ -723,7 +820,12 @@ mod tests {
     #[test]
     fn test_unescaped_angle_brackets_markup() {
         let r = pango::Layout::check_markup("<censored>");
-        assert_eq!(r.unwrap_err(), LayoutError::BadMarkup{msg: "Unknown tag \'censored\' on line 1 char 19".into()});
+        assert_eq!(
+            r.unwrap_err(),
+            LayoutError::BadMarkup {
+                msg: "Unknown tag \'censored\' on line 1 char 19".into()
+            }
+        );
     }
 
     #[test]
@@ -734,10 +836,11 @@ mod tests {
 
     #[test]
     fn test_font_size() {
-    	let font_desc = pango::FontDescription::from_string("Sans 10");
-    	let r = pango::Layout::generate_from("Hello", 100, 100, pango::Alignment::Left, &font_desc).unwrap();
-    	assert_eq!(r.font_size(), r.get_font_description().unwrap().get_size());
-    	assert_eq!(r.font_size(), (10 * pango::SCALE));
+        let font_desc = pango::FontDescription::from_string("Sans 10");
+        let r = pango::Layout::generate_from("Hello", 100, 100, pango::Alignment::Left, &font_desc)
+            .unwrap();
+        assert_eq!(r.font_size(), r.get_font_description().unwrap().get_size());
+        assert_eq!(r.font_size(), (10 * pango::SCALE));
     }
 
     // tests for layout output
@@ -852,7 +955,8 @@ mod tests {
         let mut font_desc = pango::FontDescription::new();
         let twelve_pt = 12 * pango::SCALE;
         font_desc.set_size(twelve_pt);
-        let r = SVGTextBox::get_layout(markup, 100, 100, &font_desc, pango::Alignment::Left, false).unwrap();
+        let r = SVGTextBox::get_layout(markup, 100, 100, &font_desc, pango::Alignment::Left, false)
+            .unwrap();
         assert_eq!(r.font_size(), twelve_pt);
     }
 
@@ -931,37 +1035,46 @@ mod tests {
 
     #[test]
     fn test_option_setting() {
-		let mut tb = SVGTextBox::new("A", 10, 10);
-		tb.set_alignment(pango::Alignment::Right);
-		let fd = pango::FontDescription::from_string("Serif 10");
-		tb.set_font_desc(fd.clone());
-		tb.set_static();
-		assert_eq!(tb.alignment, pango::Alignment::Right);
-		assert_eq!(tb.font_desc, fd);
-		assert_eq!(tb.grow, false);
-		tb.set_alignment_from_str("left");
-		tb.set_font_desc_from_str("Sans 10").unwrap();
-		assert_eq!(tb.alignment, pango::Alignment::Left);
-		assert_eq!(tb.font_desc, pango::FontDescription::from_string("Sans 10"));
+        let mut tb = SVGTextBox::new("A", 10, 10);
+        tb.set_alignment(pango::Alignment::Right);
+        let fd = pango::FontDescription::from_string("Serif 10");
+        tb.set_font_desc(fd.clone());
+        tb.set_static();
+        assert_eq!(tb.alignment, pango::Alignment::Right);
+        assert_eq!(tb.font_desc, fd);
+        assert_eq!(tb.grow, false);
+        tb.set_alignment_from_str("left");
+        tb.set_font_desc_from_str("Sans 10").unwrap();
+        assert_eq!(tb.alignment, pango::Alignment::Left);
+        assert_eq!(tb.font_desc, pango::FontDescription::from_string("Sans 10"));
     }
 
-	#[test]
+    #[test]
     fn test_svg_bytes() {
-    	panic!();
+        panic!();
     }
 
-	#[test]
-	fn test_embeddable_base64_svg() {
-    	panic!();
-	}
+    #[test]
+    fn test_embeddable_base64_svg() {
+        panic!();
+    }
 
-	#[test]
-	fn test_svg_string() {
-    	panic!();
-	}
+    #[test]
+    fn test_svg_string() {
+        panic!();
+    }
 
-	#[test]
-	fn test_svg_to_file() {
-    	panic!();
-	}
+    #[test]
+    fn test_svg_to_file() {
+        panic!();
+    }
+
+    #[test]
+    fn test_get_font_description() {
+        let fd = get_font_description(Some("Times New Roman"), Some("700"), Some("italic"));
+        assert_eq!(fd.get_family().unwrap(), "Times New Roman");
+        assert_eq!(fd.get_weight(), pango::Weight::Bold);
+        assert_eq!(fd.get_style(), pango::Style::Italic);
+    }
+
 }
