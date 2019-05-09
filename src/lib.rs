@@ -40,7 +40,7 @@
 //!						.set_static();
 //! ```
 //!
-//! A SVGTextbox alone isn't very helpful! The trait `SVGTextBoxOut`, however, provides a number of the most common
+//! A SVGTextbox alone isn't very helpful! The trait [SVGTextBoxOut](::SVGTextboxOut), however, provides a number of the most common
 //! transformations. (At some future point this is likely to include either native creation of png files or support for
 //! conversion into pngs, but this isn't there yet. `librsvg` or `resvg` are both great conversion tools, though.)
 //!
@@ -110,8 +110,6 @@
 //! # Things to note
 //!
 //! * Specifying a font description that doesn't exist is not a fatal error. The closest match will be used instead. This could mean things don't look quite as you expect.
-//! * I'm pretty sure that there _are_ memory leaks. Fixing them is one of the blockages to making this a public crate. If present, they're minor,
-//! 	but still enough using this as a long-running program a bad idea.
 //! * Text will not be set to a base size of more than 500 pts.
 //! 	There's no particular reason for this number, but some limit was required, and that's high enough to not be a problem generally.
 //!		(Similarly, you can't specify a width or height greater than std::i32::MAX / pango::SCALE, but if I found that to be a problem I would
@@ -272,6 +270,7 @@ pub struct SVGTextBox<'a> {
     font_desc: pango::FontDescription,
     alignment: pango::Alignment,
     grow: bool,
+    insignificant_whitespace_present: bool
 }
 
 impl<'a> SVGTextBox<'a> {
@@ -290,9 +289,10 @@ impl<'a> SVGTextBox<'a> {
     ///
     /// // Alternatively, these can be combined into one without requiring the textbox to be mutable:
     ///
+    /// let times_new_roman = pango::FontDescription::from_string("Times New Roman");
     /// let tb = SVGTextBox::new("Hello World", 100, 100)
-    ///						.set_alignment_from_str("left")
-    ///						.set_font_desc(times_new_roman_italic);
+    ///						.set_alignment_from_str("centre")
+    ///						.set_font_desc(times_new_roman);
     /// ```
     /// # Arguments
     ///
@@ -308,7 +308,36 @@ impl<'a> SVGTextBox<'a> {
             font_desc: pango::FontDescription::new(),
             alignment: pango::Alignment::Center,
             grow: true,
+            insignificant_whitespace_present: false,
         }
+    }
+
+    /// Markup often has insignificant whitespace between tags or, as a result of
+    /// indentation, before text strings. This whitespace is treated as significant by
+    /// Pango, but often it really shouldn't be.
+    /// This method indicates that whitespace in markup should be removed in the following manner:
+    /// * _all_ whitespace is normalised to non-continguous spaces.
+    /// * spaces immediately after a tag opening angle bracket or before a tag closing angle bracket are removed.
+    /// * &lt;br/&gt; tags are replaced with a newline character.
+    ///
+    /// ```xml
+    /// <span>
+    ///    Indented text
+    /// </span>
+    /// <span size="smaller">
+    ///     More text <br/>
+    ///     Etc
+    /// </span>
+    /// ```
+    /// would be normalised to
+    ///
+    /// ```xml
+    /// <span>Indented text</span><span size="smaller">More text
+    /// Etc</span>
+    /// ```
+    pub fn markup_has_insignificant_whitespace(&mut self) -> &mut SVGTextBox<'a> {
+        self.insignificant_whitespace_present = true;
+        self
     }
 
     /// Set how text should be aligned.
@@ -644,10 +673,12 @@ impl LayoutSizing for pango::Layout {
 }
 
 pub trait SVGTextboxOut {
+    fn remove_markup_insignificant_whitespace(markup: &str) -> String;
     fn as_bytes(&self) -> Result<Vec<u8>, LayoutError>;
     fn as_embeddable_base64(&self) -> Result<String, LayoutError>;
     fn as_string(&self) -> Result<String, LayoutError>;
     fn to_file(&self, path: &str) -> Result<(), LayoutError>;
+    fn layout_from(&self) -> Result<pango::Layout, LayoutError>;
     fn get_layout(
         markup: &str,
         px_width: i32,
@@ -655,6 +686,7 @@ pub trait SVGTextboxOut {
         font_desc: &pango::FontDescription,
         alignment: pango::Alignment,
         grow: bool,
+        insignificant_whitespace_present: bool
     ) -> Result<pango::Layout, LayoutError>;
 }
 
@@ -668,11 +700,11 @@ impl<'a> SVGTextboxOut for SVGTextBox<'a> {
     ///
     /// let font_desc = pango::FontDescription::from_string("Sans 10");
     /// // a static layout, where the text will be 10pts in size.
-    /// let layout = SVGTextBox::get_layout("Hello World", 100, 100, &font_desc, pango::Alignment::Left, false).unwrap();
+    /// let layout = SVGTextBox::get_layout("Hello World", 100, 100, &font_desc, pango::Alignment::Left, false, false).unwrap();
     /// // a flex layout, where the text will be whatever size is the largest that still fits.
-    /// let layout = SVGTextBox::get_layout("Hello World", 100, 100, &font_desc, pango::Alignment::Left, true).unwrap();
+    /// let layout = SVGTextBox::get_layout("Hello World", 100, 100, &font_desc, pango::Alignment::Left, true, false).unwrap();
     /// // Some basic checks will be conducted on input:
-    /// let bad_layout = SVGTextBox::get_layout("\n", 100, 100, &font_desc, pango::Alignment::Left, false);
+    /// let bad_layout = SVGTextBox::get_layout("\n", 100, 100, &font_desc, pango::Alignment::Left, false, false);
     /// assert_eq!(bad_layout.unwrap_err(), LayoutError::MarkupWhitespace);
     /// ```
     /// # Arguments
@@ -691,9 +723,14 @@ impl<'a> SVGTextboxOut for SVGTextBox<'a> {
         font_desc: &pango::FontDescription,
         alignment: pango::Alignment,
         grow: bool,
+        insignificant_whitespace_present: bool
     ) -> Result<pango::Layout, LayoutError> {
-        let layout =
-            pango::Layout::generate_from(markup, px_width, px_height, alignment, font_desc)?;
+        let clean_markup = match insignificant_whitespace_present {
+            false => markup.to_string(),
+            true => SVGTextBox::remove_markup_insignificant_whitespace(markup),
+        };
+
+        let layout = pango::Layout::generate_from(&clean_markup, px_width, px_height, alignment, font_desc)?;
         if grow {
             layout.grow_to_maximum_font_size()?;
         } else {
@@ -707,16 +744,41 @@ impl<'a> SVGTextboxOut for SVGTextBox<'a> {
         Ok(layout)
     }
 
-    ///Get a textbox rendered as a vector of bytes representing an svg.
-    fn as_bytes(&self) -> Result<Vec<u8>, LayoutError> {
-        let layout = Self::get_layout(
+    /// Generate a pango::Layout from this textbox.
+    fn layout_from(&self) -> Result<pango::Layout, LayoutError> {
+       let layout = Self::get_layout(
             self.markup,
             self.width,
             self.height,
             &self.font_desc,
             self.alignment,
             self.grow,
+            self.insignificant_whitespace_present
         )?;
+        Ok(layout) 
+    }
+
+    /// Remove insignificant whitespace from `markup`; see
+    /// the documentation for `SVGTextBox::markup_has_insignificant_whitespace`
+    /// for more details of the algorithm.
+    fn remove_markup_insignificant_whitespace(markup: &str) -> String {
+        let non_whitespace = markup.split_whitespace();
+        let joined_whitespace = non_whitespace
+                                    .map(|s| &*s)
+                                    .collect::<Vec<&str>>()
+                                    .join(" ");
+        let tags_joined = joined_whitespace
+                            .replace("> ", ">")
+                            .replace(" <", "<");
+        let newlines_added = tags_joined
+                                .replace("<br/>", "\n")
+                                .replace("<br />", "\n");
+        newlines_added
+    }
+
+    ///Get a textbox rendered as a vector of bytes representing an svg.
+    fn as_bytes(&self) -> Result<Vec<u8>, LayoutError> {
+        let layout = self.layout_from()?;
         let as_bytes = layout.as_bytes()?;
         Ok(as_bytes)
     }
@@ -940,6 +1002,7 @@ mod tests {
             &pango::FontDescription::new(),
             pango::Alignment::Left,
             false,
+            false
         )
         .unwrap();
         assert_eq!(
@@ -954,7 +1017,7 @@ mod tests {
         let mut font_desc = pango::FontDescription::new();
         let twelve_pt = 12 * pango::SCALE;
         font_desc.set_size(twelve_pt);
-        let r = SVGTextBox::get_layout(markup, 100, 100, &font_desc, pango::Alignment::Left, false)
+        let r = SVGTextBox::get_layout(markup, 100, 100, &font_desc, pango::Alignment::Left, false, false)
             .unwrap();
         assert_eq!(r.font_size(), twelve_pt);
     }
@@ -965,7 +1028,7 @@ mod tests {
         let mut font_desc = pango::FontDescription::new();
         let large_pt = 120 * pango::SCALE;
         font_desc.set_size(large_pt);
-        let l = SVGTextBox::get_layout(markup, 100, 100, &font_desc, pango::Alignment::Left, false);
+        let l = SVGTextBox::get_layout(markup, 100, 100, &font_desc, pango::Alignment::Left, false, false);
         assert_eq!(l.unwrap_err(), LayoutError::StaticFontNoFit);
     }
 
@@ -978,6 +1041,7 @@ mod tests {
             &pango::FontDescription::new(),
             pango::Alignment::Left,
             true,
+            false
         )
         .unwrap();
         assert_eq!(r.font_size(), 22528);
@@ -1024,9 +1088,9 @@ mod tests {
 
     proptest! {
         #[test]
-        fn no_crashes(markup in ".*", height in prop::num::i32::ANY, width in prop::num::i32::ANY, alignment in alignment(), grow in prop::bool::ANY) {
+        fn no_crashes(markup in ".*", height in prop::num::i32::ANY, width in prop::num::i32::ANY, alignment in alignment(), grow in prop::bool::ANY, insignificant_whitespace_present in prop::bool::ANY) {
             let font_desc = pango::FontDescription::new();
-            let _r = SVGTextBox::get_layout(&markup, width, height, &font_desc, alignment, grow);
+            let _r = SVGTextBox::get_layout(&markup, width, height, &font_desc, alignment, grow, insignificant_whitespace_present);
         }
     }
 
@@ -1067,6 +1131,24 @@ mod tests {
     fn test_svg_to_file() {
         panic!();
     }
+
+    #[test]
+    fn test_insignificant_whitespace_is_removed_if() {
+        let tb = SVGTextBox::new("\tA", 10, 10);
+        let layout = tb.layout_from().unwrap();
+        assert_eq!(layout.get_text().unwrap(), "A");
+    }
+
+    #[test]
+    fn test_insignificant_whitespace_removal_algorithm() {
+        let remove_whitespace = SVGTextBox::remove_markup_insignificant_whitespace;
+        assert_eq!(remove_whitespace("\tA"), "A");
+        assert_eq!(remove_whitespace("<span>\tA</span>"), "<span>A</span>");
+        assert_eq!(remove_whitespace("<span>A B</span>"), "<span>A B</span>");
+        assert_eq!(remove_whitespace("<span>A <br/> B</span>"), "<span>A\nB</span>");
+        assert_eq!(remove_whitespace("<span>\n\tOuter\n\t<span>\n\t\tInner\n\t</span>\n</span>"), "<span>Outer<span>Inner</span></span>");
+    }
+
 
     #[test]
     fn test_get_font_description() {
