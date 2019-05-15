@@ -103,6 +103,7 @@ mod tests {
             px_height,
             pango::Alignment::Left,
             &pango::FontDescription::new(),
+            None
         )
         .unwrap()
         .as_bytes();
@@ -123,6 +124,7 @@ mod tests {
             px_height,
             pango::Alignment::Left,
             &pango::FontDescription::new(),
+            None
         ).unwrap();
 
         assert_eq!(x.pts_height(), pt_height);
@@ -135,7 +137,7 @@ mod tests {
         let mut font_desc = pango::FontDescription::new();
         font_desc.set_size(20 * pango::SCALE);
         let layout =
-            pango::Layout::generate_from("Jyrfg", 100, 100, pango::Alignment::Center, &font_desc)
+            pango::Layout::generate_from("Jyrfg", 100, 100, pango::Alignment::Center, &font_desc, None)
                 .unwrap();
 
         let reported_offset_padding = layout.calculate_top_padding();

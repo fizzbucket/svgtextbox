@@ -17,6 +17,7 @@ pub trait LayoutBase {
         px_height: i32,
         alignment: pango::Alignment,
         font_desc: &pango::FontDescription,
+        explicit_font_size: Option<i32>
     ) -> Result<pango::Layout, LayoutError>;
     fn font_size(&self) -> i32;
 }
@@ -38,6 +39,7 @@ impl LayoutBase for pango::Layout {
         px_height: i32,
         alignment: pango::Alignment,
         font_desc: &pango::FontDescription,
+        explicit_font_size: Option<i32>
     ) -> Result<pango::Layout, LayoutError> {
         // Quick check to see that distance values make sense.
         if (px_width <= Self::DISTANCE_MIN)
@@ -49,7 +51,20 @@ impl LayoutBase for pango::Layout {
         }
 
         let layout = pango::Layout::generate();
+
         layout.set_font_description(font_desc);
+        
+        // It's conceivable that we were given an explicit
+        // font size but not a font description set to it already.
+        if let Some(i) = explicit_font_size {
+            let scaled_font_size = i * pango::SCALE;
+            // avoid having to have original font_desc as mutable
+            let mut fetched_fd = layout.get_font_description().unwrap();
+            if fetched_fd.get_size() != scaled_font_size {
+                fetched_fd.set_size(scaled_font_size);
+                layout.set_font_description(&fetched_fd);
+            }
+        }
         layout.set_ellipsize(pango::EllipsizeMode::End);
         layout.set_wrap(pango::WrapMode::Word);
         layout.set_alignment(alignment);
@@ -136,6 +151,7 @@ impl LayoutSizing for pango::Layout {
             // lines are disappearing off the bottom.
             // here we check this by seeing if the index of the last
             // visible grapheme is the same as it was in the beginning.
+            // TODO: this seems to introduce an element of chance?
             if self.fits() & (self.last_char_index() == orig_last_char) {
                 std::cmp::Ordering::Less
             } else {
@@ -167,6 +183,30 @@ mod tests {
     use crate::output::LayoutWrite;
 
     #[test]
+    fn test_change_font_size() {
+        let r = pango::Layout::generate_from(
+            "Hello &amp; World",
+            100,
+            100,
+            pango::Alignment::Left,
+            &pango::FontDescription::from_string("Sans 10"),
+            None
+        ).unwrap();
+        assert_eq!(r.font_size(), 10 * pango::SCALE);
+        r.change_font_size(12 * pango::SCALE);
+        assert_eq!(r.font_size(), 12 * pango::SCALE);
+        let r = pango::Layout::generate_from(
+            "Hello &amp; World",
+            100,
+            100,
+            pango::Alignment::Left,
+            &pango::FontDescription::from_string("Sans 10"),
+            Some(12)
+        ).unwrap();
+        assert_eq!(r.font_size(), 12 * pango::SCALE);
+    }
+
+    #[test]
     fn test_layout_generate_from() {
         let r = pango::Layout::generate_from(
             "Hello &amp; World",
@@ -174,6 +214,7 @@ mod tests {
             100,
             pango::Alignment::Left,
             &pango::FontDescription::from_string("Sans 10"),
+            None
         )
         .unwrap();
         assert_eq!(r.get_text().unwrap(), "Hello & World");
@@ -192,19 +233,19 @@ mod tests {
 
     #[test]
     fn test_bad_layout_dists() {
-        let l = pango::Layout::generate_from("Hello", 1, 0, pango::Alignment::Left, &pango::FontDescription::new());
+        let l = pango::Layout::generate_from("Hello", 1, 0, pango::Alignment::Left, &pango::FontDescription::new(), None);
         assert!(l.is_err());
-        let l = pango::Layout::generate_from("Hello", 0, 0, pango::Alignment::Left, &pango::FontDescription::new());
+        let l = pango::Layout::generate_from("Hello", 0, 0, pango::Alignment::Left, &pango::FontDescription::new(), None);
         assert!(l.is_err());
-        let l = pango::Layout::generate_from("Hello", 0, 1, pango::Alignment::Left, &pango::FontDescription::new());
+        let l = pango::Layout::generate_from("Hello", 0, 1, pango::Alignment::Left, &pango::FontDescription::new(), None);
         assert!(l.is_err());
-        let l = pango::Layout::generate_from("Hello", -1, 1, pango::Alignment::Left, &pango::FontDescription::new());
+        let l = pango::Layout::generate_from("Hello", -1, 1, pango::Alignment::Left, &pango::FontDescription::new(), None);
         assert!(l.is_err());
-        let l = pango::Layout::generate_from("Hello", 1, -1, pango::Alignment::Left, &pango::FontDescription::new());
+        let l = pango::Layout::generate_from("Hello", 1, -1, pango::Alignment::Left, &pango::FontDescription::new(), None);
         assert!(l.is_err());
-        let l = pango::Layout::generate_from("Hello", -1, -1, pango::Alignment::Left, &pango::FontDescription::new());
+        let l = pango::Layout::generate_from("Hello", -1, -1, pango::Alignment::Left, &pango::FontDescription::new(), None);
         assert!(l.is_err());
-        let l = pango::Layout::generate_from("Hello", 10, 10, pango::Alignment::Left, &pango::FontDescription::new());
+        let l = pango::Layout::generate_from("Hello", 10, 10, pango::Alignment::Left, &pango::FontDescription::new(), None);
         assert!(l.is_ok());
 
 }
@@ -213,10 +254,15 @@ mod tests {
     #[test]
     fn test_font_size() {
         let font_desc = pango::FontDescription::from_string("Sans 10");
-        let r = pango::Layout::generate_from("Hello", 100, 100, pango::Alignment::Left, &font_desc)
+        let r = pango::Layout::generate_from("Hello", 100, 100, pango::Alignment::Left, &font_desc, None)
             .unwrap();
         assert_eq!(r.font_size(), r.get_font_description().unwrap().get_size());
         assert_eq!(r.font_size(), (10 * pango::SCALE));
+        let r = pango::Layout::generate_from("Hello", 100, 100, pango::Alignment::Left, &font_desc, Some(12))
+            .unwrap();
+        assert_eq!(r.font_size(), r.get_font_description().unwrap().get_size());
+        assert_eq!(r.font_size(), (12 * pango::SCALE));
+
     }
 
 
@@ -228,6 +274,7 @@ mod tests {
             500,
             pango::Alignment::Center,
             &pango::FontDescription::new(),
+            None
         )
         .unwrap();
         let poss_sizes = (0..50).collect::<Vec<i32>>();
@@ -244,6 +291,7 @@ mod tests {
             500,
             pango::Alignment::Center,
             &pango::FontDescription::new(),
+            None
         )
         .unwrap();
         let poss_sizes = (0..=45).collect::<Vec<i32>>();
@@ -268,6 +316,7 @@ mod tests {
             1200,
             pango::Alignment::Center,
             &pango::FontDescription::new(),
+            None
         )
         .unwrap();
 
@@ -278,7 +327,7 @@ mod tests {
 
     #[test]
     fn lines_drop_3() {
-        let layout = pango::Layout::generate_from("SOME TITLE\n――\nSOME AUTHOR\n<span size=\"smaller\"><span style=\"italic\">Edited by</span>\nSOME EDITOR</span>", 2000, 2000, pango::Alignment::Center, &pango::FontDescription::new()).unwrap();
+        let layout = pango::Layout::generate_from("SOME TITLE\n――\nSOME AUTHOR\n<span size=\"smaller\"><span style=\"italic\">Edited by</span>\nSOME EDITOR</span>", 2000, 2000, pango::Alignment::Center, &pango::FontDescription::new(), None).unwrap();
         let poss_sizes = (190..200).collect::<Vec<i32>>();
         let changed_font_size = layout.grow_to_maximum_font_size(&poss_sizes).unwrap();
         assert_eq!(changed_font_size, 192);
@@ -290,7 +339,7 @@ mod tests {
         let mut font_desc = pango::FontDescription::new();
         let large_pt = 120 * pango::SCALE;
         font_desc.set_size(large_pt);
-        let l = pango::Layout::generate_from(markup, 100, 100, pango::Alignment::Left, &font_desc).unwrap();
+        let l = pango::Layout::generate_from(markup, 100, 100, pango::Alignment::Left, &font_desc, None).unwrap();
         assert!(!l.fits());
     }
 

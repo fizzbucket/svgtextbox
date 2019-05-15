@@ -42,7 +42,7 @@ pub enum LayoutDimensions {
 
 impl LayoutDimensions {
 
-	fn new(mut width: HashSet<i32>, mut height: HashSet<i32>) -> Self {
+	pub fn new(mut width: HashSet<i32>, mut height: HashSet<i32>) -> Self {
 
 		let width_is_static =  width.len() == 1;
 		let height_is_static = height.len() == 1;
@@ -78,7 +78,7 @@ pub enum FontSizing {
 }
 
 impl FontSizing {
-	fn from_range(min: Option<i32>, max: Option<i32>) -> Result<Self, LayoutError> {
+	pub fn from_range(min: Option<i32>, max: Option<i32>) -> Result<Self, LayoutError> {
 		let range = match (min, max) {
 			(Some(min), None) => {
 				(min..=DEFAULT_MAX_FONT_SIZE)

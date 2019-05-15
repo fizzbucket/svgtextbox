@@ -27,8 +27,8 @@
 //! // Have a width of 100 px, but a height of either 25 or 50px;
 //! let possible_heights: HashSet<i32> = vec![25, 50].into_iter().collect();
 //! let dimensions = LayoutDimensions::StaticWidthFlexHeight(100, possible_heights);
-//! // Use a fixed font size of 24pts.
-//! let fontsizing = FontSizing::Static(24);
+//! // Use a fixed font size of 12pts.
+//! let fontsizing = FontSizing::Static(12);
 //!
 //! let input = TextBoxInput {
 //!		markup: "Hello World".to_string(),
