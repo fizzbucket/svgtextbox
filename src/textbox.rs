@@ -19,13 +19,8 @@ impl <'a> LayoutBuilder<'a> {
 		Ok(layout.to_output())
 	}
 
-    fn _generate_layout(&self, width: &i32, height: &i32) -> Result<pango::Layout, LayoutError> {
+    fn _generate_layout(&self, width: &i32, height: &i32, explicit_font_size: Option<i32>) -> Result<pango::Layout, LayoutError> {
         
-        let explicit_font_size = match &self.input.fontsizing {
-            FontSizing::Static(i) => Some(*i),
-            FontSizing::Selection(_) => None,
-        };
-
         let layout = pango::Layout::generate_from(&self.input.markup, *width, *height, self.input.alignment, &self.input.font_desc, explicit_font_size)?;
 
         if let FontSizing::Selection(sizes) = &self.input.fontsizing {
@@ -37,9 +32,14 @@ impl <'a> LayoutBuilder<'a> {
 
     fn to_layout(&self) -> Result<pango::Layout, LayoutError>{
 
+        let explicit_font_size = match &self.input.fontsizing {
+            FontSizing::Static(i) => Some(*i),
+            FontSizing::Selection(_) => None,
+        };
+
         match &self.input.dimensions {
             LayoutDimensions::Static(width, height) => {
-                let layout = self._generate_layout(width, height)?;
+                let layout = self._generate_layout(width, height, explicit_font_size)?;
                 if layout.fits() {
                     return Ok(layout)
                 }
@@ -47,7 +47,7 @@ impl <'a> LayoutBuilder<'a> {
             },
             LayoutDimensions::StaticWidthFlexHeight(width, heights) => {
                 for height in heights {
-                    let layout = self._generate_layout(width, height)?;
+                    let layout = self._generate_layout(width, height, explicit_font_size)?;
                     if layout.fits() {
                         return Ok(layout);
                     }
@@ -56,7 +56,7 @@ impl <'a> LayoutBuilder<'a> {
             },
             LayoutDimensions::FlexWidthStaticHeight(widths, height) => {
                 for width in widths {
-                    let layout = self._generate_layout(width, height)?;
+                    let layout = self._generate_layout(width, height, explicit_font_size)?;
                     if layout.fits() {
                         return Ok(layout);
                     }
@@ -69,14 +69,14 @@ impl <'a> LayoutBuilder<'a> {
                 let min_height = heights.iter().min().unwrap();
 
                 for width in widths {
-                    let layout = self._generate_layout(width, min_height)?;
+                    let layout = self._generate_layout(width, min_height, explicit_font_size)?;
                     if layout.fits() {
                         return Ok(layout);
                     }
                 }
 
                 for height in heights {
-                    let layout = self._generate_layout(max_width, height)?;
+                    let layout = self._generate_layout(max_width, height, explicit_font_size)?;
                     if layout.fits() {
                         return Ok(layout);
                     }
@@ -108,9 +108,9 @@ mod tests {
     fn test_generate_layout() {
 
         let mut input = basic_input();
-        let static_layout = LayoutBuilder{input: &input}._generate_layout(&100, &100).unwrap();
+        let static_layout = LayoutBuilder{input: &input}._generate_layout(&100, &100, Some(12)).unwrap();
         input.fontsizing = FontSizing::from_range(Some(12), Some(100)).unwrap();
-        let flex_layout = LayoutBuilder{input: &input}._generate_layout(&100, &100).unwrap();
+        let flex_layout = LayoutBuilder{input: &input}._generate_layout(&100, &100, None).unwrap();
 
         let static_font_size = static_layout.font_size();
         let flex_font_size = flex_layout.font_size();
@@ -120,7 +120,7 @@ mod tests {
         assert!(flex_layout.fits());
         // this is not the place to throw an error, even if it doesn't fit.
         input.fontsizing = FontSizing::Static(100);
-        let oversized_layout = LayoutBuilder{input: &input}._generate_layout(&100, &100).unwrap();
+        let oversized_layout = LayoutBuilder{input: &input}._generate_layout(&100, &100, Some(100)).unwrap();
         assert!(!oversized_layout.fits());
     }
 
