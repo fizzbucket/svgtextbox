@@ -221,25 +221,25 @@ pub fn from_backgrounded_element_to_element_group(src_elem: &Element) -> Element
     let textbox_x = x + ps.left;
     let textbox_y = y + ps.top;
 
+    let get_width = |w| w - (ps.left + ps.right);
+    let get_height = |h| h - (ps.top + ps.bottom);
+
+
     let new_dimensions = match input.dimensions {
             LayoutDimensions::Static(width, height) => {
-                let w = width - (ps.left + ps.right);
-                let h = height - (ps.top + ps.bottom);
-                LayoutDimensions::Static(w, h)
+                LayoutDimensions::Static(get_width(width), get_height(height))
             },
             LayoutDimensions::StaticWidthFlexHeight(width, heights) => {
-                let w = width - (ps.left + ps.right);
-                let h: HashSet<i32> = heights.iter().map(|x| x - (ps.top + ps.bottom)).collect();
-                LayoutDimensions::StaticWidthFlexHeight(w, h)
+                let h: HashSet<i32> = heights.iter().map(|x| get_height(*x)).collect();
+                LayoutDimensions::StaticWidthFlexHeight(get_width(width), h)
             },
             LayoutDimensions::FlexWidthStaticHeight(widths, height) => {
-                let h = height - (ps.top + ps.bottom);
-                let w: HashSet<i32> = widths.iter().map(|x| x - (ps.left + ps.right)).collect();
-                LayoutDimensions::FlexWidthStaticHeight(w, h)
+                let w: HashSet<i32> = widths.iter().map(|x| get_width(*x)).collect();
+                LayoutDimensions::FlexWidthStaticHeight(w, get_height(height))
             },
             LayoutDimensions::Flex(widths, heights) => {
-                let w: HashSet<i32> = widths.iter().map(|x| x - (ps.left + ps.right)).collect();
-                let h: HashSet<i32> = heights.iter().map(|x| x - (ps.top + ps.bottom)).collect();
+                let w: HashSet<i32> = widths.iter().map(|x| get_width(*x)).collect();
+                let h: HashSet<i32> = heights.iter().map(|x| get_height(*x)).collect();
                 LayoutDimensions::Flex(w, h)
             }
     };

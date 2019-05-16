@@ -45,7 +45,9 @@ impl <'a> LayoutBuilder<'a> {
                 }
                 Err(LayoutError::CouldNotFitLayout)
             },
-            LayoutDimensions::StaticWidthFlexHeight(width, heights) => {
+            LayoutDimensions::StaticWidthFlexHeight(width, heights_unsorted) => {
+                let mut heights: Vec<&i32> = heights_unsorted.iter().collect();
+                heights.sort_unstable(); 
                 for height in heights {
                     let layout = self._generate_layout(width, height, explicit_font_size)?;
                     if layout.fits() {
@@ -54,7 +56,9 @@ impl <'a> LayoutBuilder<'a> {
                 }
                 Err(LayoutError::CouldNotFitLayout)
             },
-            LayoutDimensions::FlexWidthStaticHeight(widths, height) => {
+            LayoutDimensions::FlexWidthStaticHeight(unsorted_widths, height) => {
+                let mut widths: Vec<&i32> = unsorted_widths.iter().collect();
+                widths.sort_unstable(); 
                 for width in widths {
                     let layout = self._generate_layout(width, height, explicit_font_size)?;
                     if layout.fits() {
@@ -63,19 +67,26 @@ impl <'a> LayoutBuilder<'a> {
                 }
                 Err(LayoutError::CouldNotFitLayout)
             },
-            LayoutDimensions::Flex(widths, heights) => {
+            LayoutDimensions::Flex(unsorted_widths, unsorted_heights) => {
+                // TODO: Sort these also!
                 // try to expand width first
-                let max_width = widths.iter().max().unwrap();
-                let min_height = heights.iter().min().unwrap();
+                let mut heights: Vec<&i32> = unsorted_heights.iter().collect();
+                heights.sort_unstable(); 
 
-                for width in widths {
+                let mut widths: Vec<&i32> = unsorted_widths.iter().collect();
+                widths.sort_unstable(); 
+
+                let max_width = &widths.last().unwrap();
+                let min_height = &heights.first().unwrap();
+
+                for width in &widths {
                     let layout = self._generate_layout(width, min_height, explicit_font_size)?;
                     if layout.fits() {
                         return Ok(layout);
                     }
                 }
 
-                for height in heights {
+                for height in &heights {
                     let layout = self._generate_layout(max_width, height, explicit_font_size)?;
                     if layout.fits() {
                         return Ok(layout);
@@ -102,6 +113,29 @@ mod tests {
             alignment: pango::Alignment::Left,
             fontsizing: FontSizing::Static(12),
         }
+    }
+
+    #[test]
+    fn test_ordering_of_distance_options() {
+        /// give a really small distance and font together with lots of really big distances
+        /// to check that the smallest option is correctly being chosen, with odds of ~100: 1 that
+        /// this won't happen by chance anyway
+        let mut input = basic_input();
+        let mut size_vec: Vec<i32> = (100..200).collect();
+        size_vec.insert(1, 20);
+        let size_set: HashSet<i32> = size_vec.iter().map(|x| *x).collect();
+        input.dimensions = LayoutDimensions::StaticWidthFlexHeight(100, size_set);
+        input.fontsizing = FontSizing::Static(10);
+        let output = LayoutBuilder::get_layout_output(&input).unwrap();
+        assert_eq!(output.height, 20);
+
+        let mut size_vec: Vec<i32> = (200..300).collect();
+        size_vec.insert(1, 100);
+        let size_set: HashSet<i32> = size_vec.iter().map(|x| *x).collect();
+
+        input.dimensions = LayoutDimensions::FlexWidthStaticHeight(size_set, 20);
+        let output = LayoutBuilder::get_layout_output(&input).unwrap();
+        assert_eq!(output.width, 100);
     }
 
     #[test]
