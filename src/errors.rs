@@ -5,6 +5,7 @@ use std::num::ParseIntError;
 
 custom_error! {
     pub LayoutError
+    Generic = "An unspecified error occurred",
     Utf8Error{source: Utf8Error} = "Utf 8 Error",
     ParseInt{source: ParseIntError} = "Error parsing int",
     XMLMinidomReportedError{msg: String} = "Error parsing xml: {}",
@@ -16,7 +17,8 @@ custom_error! {
     CouldNotFitLayout = "Attempted to create a layout which could not fit",
     BadFontRange = "Attempted to create a font range where the minimum was greater than the maximum.",
     BadFontFamily = "Attempted to set an unparseable font family name",
-    IntsFromString{msg: String} = "Could not parse ints from str: {}"
+    IntsFromString{msg: String} = "Could not parse ints from str: {}",
+    XMLRequiredAttributeMissing{msg: String} = "An xml element was missing a required attribute: `{}`",
 }
 
 impl From<minidom::Error> for LayoutError {

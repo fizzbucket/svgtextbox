@@ -117,9 +117,9 @@ mod tests {
 
     #[test]
     fn test_ordering_of_distance_options() {
-        /// give a really small distance and font together with lots of really big distances
-        /// to check that the smallest option is correctly being chosen, with odds of ~100: 1 that
-        /// this won't happen by chance anyway
+        // give a really small distance and font together with lots of really big distances
+        // to check that the smallest option is correctly being chosen, with odds of ~100: 1 that
+        // this won't happen by chance anyway
         let mut input = basic_input();
         let mut size_vec: Vec<i32> = (100..200).collect();
         size_vec.insert(1, 20);

@@ -204,7 +204,7 @@ pub fn from_element_to_element(src_elem: &Element) -> Result<Element, LayoutErro
 /// * Three values: apply the first to the top, the second to the left and right, and the third to the bottom.
 /// * Four values: apply in clockwise order: top, right, bottom, left.
 ///
-pub fn from_backgrounded_element_to_element_group(src_elem: &Element) -> Element {
+pub fn from_backgrounded_element_to_element_group(src_elem: &Element) -> Result<Element, LayoutError> {
     let mut attrs = HashMap::new();
     for (k, v) in src_elem.attrs() {
         attrs.insert(k.to_string(), v.to_string());
@@ -213,11 +213,19 @@ pub fn from_backgrounded_element_to_element_group(src_elem: &Element) -> Element
     let markup = get_markup(src_elem, &mut attrs).unwrap();
     let mut input = TextBoxInput::new_from(markup, &mut attrs).unwrap();
 
-    let padding = attrs.remove("padding").unwrap();
-    let x: i32 = attrs.remove("x").unwrap().parse().unwrap();
-    let y: i32 = attrs.remove("y").unwrap().parse().unwrap();
-
-    let ps = PaddingSpecification::new(&padding);
+    let padding = match attrs.remove("padding") {
+        Some(p) => p,
+        None => return Err(LayoutError::XMLRequiredAttributeMissing{msg: "padding".to_string()})
+    };
+    let x: i32 = match attrs.remove("x") {
+        Some(i) => i.parse()?,
+        None => return Err(LayoutError::XMLRequiredAttributeMissing{msg: "x".to_string()})
+    };
+    let y: i32 = match attrs.remove("y") {
+        Some(i) => i.parse()?,
+        None => return Err(LayoutError::XMLRequiredAttributeMissing{msg: "y".to_string()})
+    };
+    let ps = PaddingSpecification::new(&padding)?;
     let textbox_x = x + ps.left;
     let textbox_y = y + ps.top;
 
@@ -245,7 +253,7 @@ pub fn from_backgrounded_element_to_element_group(src_elem: &Element) -> Element
     };
 
     input.dimensions = new_dimensions;
-    let textbox_output = LayoutBuilder::get_layout_output(&input).unwrap();
+    let textbox_output = LayoutBuilder::get_layout_output(&input)?;
 
 
     let b64 = base64::encode(&textbox_output.rendered);
@@ -272,7 +280,7 @@ pub fn from_backgrounded_element_to_element_group(src_elem: &Element) -> Element
     let mut output_group = Element::builder("g").build();
     output_group.append_child(output_rect);
     output_group.append_child(output_image);
-    output_group
+    Ok(output_group)
 }
 
 
@@ -286,9 +294,9 @@ struct PaddingSpecification {
 
 impl PaddingSpecification {
 
-    fn from_vec(mut v: Vec<i32>) -> PaddingSpecification {
+    fn from_vec(mut v: Vec<i32>) -> Result<PaddingSpecification, LayoutError> {
         
-        match v.len() {
+        let ps = match v.len() {
             1 => {
                 let all = v.remove(0);
                 PaddingSpecification {
@@ -329,20 +337,18 @@ impl PaddingSpecification {
                     left: v.remove(3),
                 }
             },
-            _ => panic!(),
-        } 
+            _ => return Err(LayoutError::Generic),
+        };
+        Ok(ps)
     }
 
-    fn new(src: &str) -> PaddingSpecification {
-        let substrings: Vec<&str> = src.split_whitespace().collect();
-        
-        let results: Vec<i32> = substrings
-            .into_iter().map(
-                |s| {
-                    s.parse().unwrap()
-                })
-            .collect();
-        Self::from_vec(results)
+    fn new(src: &str) -> Result<PaddingSpecification, LayoutError> {
+        let mut ints: Vec<i32> = Vec::new();
+        for s in src.split_whitespace() {
+            let parsed = s.parse::<i32>()?;
+            ints.push(parsed);
+        }
+        Ok(Self::from_vec(ints)?)
     }
 }
 
