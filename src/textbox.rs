@@ -28,8 +28,8 @@ impl <'a> LayoutBuilder<'a> {
 
         let layout = pango::Layout::generate_from(&self.input.markup, *width, *height, self.input.alignment, &self.input.font_desc, explicit_font_size)?;
 
-        if let FontSizing::Selection(v) = &self.input.fontsizing {
-                layout.grow_to_maximum_font_size(&v)?;
+        if let FontSizing::Selection(sizes) = &self.input.fontsizing {
+                layout.grow_to_maximum_font_size(&sizes)?;
         };
 
         Ok(layout)

@@ -99,20 +99,53 @@ fn get_markup(src_elem: &Element, attrs: &mut HashMap<String, String>) -> Result
 
 
 /// Generate a textbox from an xml element, then return a new element which contains
-/// the textbox as an image suitable for embedding in an svg file.
+/// the textbox as an image tag suitable for embedding in an svg file.
+///
+/// The xml element should have a child tag `markup` containing pango-like markup for the textbox.
+/// (Note that the markup is only _pango-like_: a new tag `&lt;br/&gt;` is used to indicate a newline, since
+/// all whitespace will be normalised unless the `preserve-whitepace` attribute is set.)
+/// # Attributes
+///
+/// ## Compulsory
+/// * `width`: the width in pixels of the textbox.
+/// * `height`: the height in pixels of the textbox.
+///
+/// The eventual value of both these distances can be either a single fixed number, a range of possibilities between a minimum and maximum distance,
+/// or an arbitrary number of possibilities.
+///
+/// A single number is specified like so: `width="100"`.
+///
+/// A range should be minimum and maximum seperated by a space: `width="100 200"` means a range of `100..=200`.
+///
+/// Specified possibilities should also be seperated by a space: `width="100 150 200"`.
+///
+/// To indicate two possibilities
+/// rather than a range of possibilities, place the maximum value first: `width="200 100"` means `a width of either 200 or 100`,
+/// while `width="100 200"` means `a width of any value between 100 and 200`.
+///
+/// ## Optional
+/// * `preserve-whitespace`: if set to any value other than `false`, do _not_ remove insignificant whitespace from the markup.
+/// * `font-family`: the family of font to use as the base.
+/// * `font-size`: the font size in pts to use. If this is set, the values (if any) of `min-size` and `max-size` are ignored and text
+///    sizes will not be increased to fit but instead left static.
+/// * `min-size`: the minimum font size in pts, if a range of font sizes are possible. Defaults to `DEFAULT_MIN_FONT_SIZE`.
+/// * `max-size`: the maximum font size in pts, if a range of font sizes are possible. Defaults to `DEFAULT_MAX_FONT_SIZE`.
+/// * `font-style`: the base style of font (`normal`, `italic`, `oblique`). Defaults to normal.
+/// * `font-weight`: the base font weight. Can be either numeric (as in css values) or use names: `bold` and `700` are equivalent. Defaults to 400.
+/// * `font-variant`: the font variant to use (`normal` or `smallcaps`). Defaults to normal.
+/// * `font-stretch`: the stretch to use (e.g. `condensed`). Defaults to normal.
+/// * `alignment`: the alignment of the text (`left`, `center` or `centre`, `right`). Defaults to centre.
 pub fn from_element_to_element(src_elem: &Element) -> Result<Element, LayoutError> {
+    let mut attrs = HashMap::new();
+    for (k, v) in src_elem.attrs() {
+        attrs.insert(k.to_string(), v.to_string());
+    }
+    let markup = get_markup(src_elem, &mut attrs)?;
+    let input = TextBoxInput::new_from(markup, &mut attrs)?;
+    let output = LayoutBuilder::get_layout_output(&input)?;
 
-	let mut attrs = HashMap::new();
-	for (k, v) in src_elem.attrs() {
-		attrs.insert(k.to_string(), v.to_string());
-	}
 
-	let markup = get_markup(src_elem, &mut attrs)?;
-	
-	let input = TextBoxInput::new_from(markup, &mut attrs)?;
-	let output = LayoutBuilder::get_layout_output(&input)?;
-
-	let b64 = base64::encode(&output.rendered);
+    let b64 = base64::encode(&output.rendered);
     let prefixed_b64 = format!("data:image/svg+xml;base64, {}", b64);
 
     let mut output_element = Element::builder("image").build();

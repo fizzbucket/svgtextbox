@@ -117,7 +117,7 @@ pub trait FromHashMap {
 impl FromHashMap for TextBoxInput {
 
 	fn new_from(markup: String, mut src: &mut HashMap<String, String>) -> Result<TextBoxInput, LayoutError> {
-		let alignment = match src.get("alignment") {
+		let alignment = match src.remove("alignment") {
 			Some(s) => {
 				Self::alignment_from_str(&s)?
 			},
@@ -387,36 +387,40 @@ mod tests {
 
     #[test]
     fn test_get_fontsizing() {
-    	let mut hashmap: HashMap<String, String> = HashMap::new();
+
+        let mut hashmap: HashMap<String, String> = HashMap::new();
+
+
+        macro_rules! match_or_panic {
+            ($fontsizing:ident, $p:pat) => (
+                match $fontsizing {
+                    $p => {},
+                    _ => panic!(),
+                }
+            )
+        }
+
+
+
     	let none_set = TextBoxInput::fontsizing_from_hashmap(&mut hashmap).unwrap();
-    	match none_set {
-    		FontSizing::Selection(_) => {},
-    		_ => panic!()
-    	}
+        match_or_panic!(none_set, FontSizing::Selection(_));
 
     	hashmap.insert("font-size".to_string(), "10".to_string());
-    	match TextBoxInput::fontsizing_from_hashmap(&mut hashmap) {
-    		Ok(FontSizing::Static(10)) => {},
-    		_ => panic!(),
-    	}
+        let static_set = TextBoxInput::fontsizing_from_hashmap(&mut hashmap).unwrap();
+        match_or_panic!(static_set, FontSizing::Static(10));
+
     	hashmap.insert("font-size".to_string(), "10".to_string());
     	hashmap.insert("min-size".to_string(), "8".to_string());
-    	match TextBoxInput::fontsizing_from_hashmap(&mut hashmap) {
-    		Ok(FontSizing::Static(10)) => {},
-    		_ => panic!(),
-    	}
+        let fs = TextBoxInput::fontsizing_from_hashmap(&mut hashmap).unwrap();
+        match_or_panic!(fs, FontSizing::Static(10));
 
     	hashmap.insert("min-size".to_string(), "8".to_string());
-    	match TextBoxInput::fontsizing_from_hashmap(&mut hashmap) {
-    		Ok(FontSizing::Selection(_)) => {},
-    		_ => panic!(),
-    	}
+    	let x = TextBoxInput::fontsizing_from_hashmap(&mut hashmap).unwrap();
+    	match_or_panic!(x, FontSizing::Selection(_));
 
     	hashmap.insert("max-size".to_string(), "8".to_string());
-    	match TextBoxInput::fontsizing_from_hashmap(&mut hashmap) {
-    		Ok(FontSizing::Selection(_)) => {},
-    		_ => panic!(),
-    	}
+    	let x = TextBoxInput::fontsizing_from_hashmap(&mut hashmap).unwrap();
+    	match_or_panic!(x, FontSizing::Selection(_));
 
     }
 

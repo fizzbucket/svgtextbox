@@ -17,12 +17,12 @@
 //! but hopefully is substantially easier to use.
 //!
 //! # Examples
+//! 
+//! You can expand a textbox to fit static text:
 //!
 //! ```
 //! # use svgtextbox::{LayoutDimensions, FontSizing, TextBoxInput, LayoutBuilder};
 //! # use std::collections::HashSet;
-//!
-//! // Expand a textbox to fit text
 //!
 //! // Have a width of 100 px, but a height of either 25 or 50px;
 //! let possible_heights: HashSet<i32> = vec![25, 50].into_iter().collect();
@@ -46,9 +46,13 @@
 //! let height = rendered_layout.height;
 //! // Because the text would not fit at 25px, the textbox used a height of 50px instead.
 //! assert_eq!(height, 50);
+//!```
+//! But it is equally possible to grow text to fit a textbox (and, of course, the two approaches can be combined).
 //!
-//! // Make text size larger to fit a textbox of 200 x 200px:
-//!
+//! ```
+//! # use svgtextbox::{LayoutDimensions, FontSizing, TextBoxInput, LayoutBuilder};
+//! # use std::collections::HashSet;
+//! // Specify textbox of 200 x 200px:
 //! let dimensions = LayoutDimensions::Static(200, 200);
 //! // The text will be set in the largest of these sizes that fits:
 //! let fontsizing = FontSizing::Selection(vec![10, 20, 30, 40, 50, 60]);
@@ -61,6 +65,7 @@
 //! };
 //! let rendered_layout = LayoutBuilder::get_layout_output(&input).unwrap();
 //!```
+//!
 //! Another method to specify a textbox is as an xml element.
 //! This should have the following form:
 //! ```xml
@@ -75,21 +80,8 @@
 //! <image width="100" height="100" xlink:href="[textbox as base64]"></image>
 //! ```
 //!
-//! Further control is enabled by adding optional attributes to the `textbox` element:
-//!
-//! * `alignment`: the alignment to use: (one of left, centre, right)
-//! * `font-family`: the name of the font family to use.
-//! * `font-weight`: the weight of the font to use.
-//! * `font-style`: the font style to use.
-//! * `font-variant` 
-//! * `font-stretch`
-//! * `font-size`
-//! * `font-sizes`
-//! * `min-font-size`
-//! * `max-font-size`
-//! * `preserve-whitespace`
-//! 
-//! Any other attributes will be passed through to the output element.
+//! Further control is enabled by adding optional attributes to the `textbox` element;
+//! see the documentation for `from_element_to_element` for details.
 //!
 //! # XML usage example
 //! ```

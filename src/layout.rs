@@ -159,7 +159,11 @@ impl LayoutSizing for pango::Layout {
             }
         };
 
-        let search_result = possible_font_sizes.binary_search_by(|i| will_fit(i * pango::SCALE));
+        // n.b. binary search assumes vec is already sorted
+        let mut p = possible_font_sizes.clone();
+        p.sort_unstable();
+        p.dedup();
+        let search_result = p.binary_search_by(|i| will_fit(i * pango::SCALE));
         let index: i32 = search_result.err().unwrap() as i32;
         // Almost always this is an error representing a value too small;
         // but just in case we have 1pt text...
