@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use crate::input::TextBoxInput;
-use crate::input::FromHashMap;
+use crate::input::{FromHashMap, LayoutDimensions};
 use crate::errors::LayoutError;
 use crate::textbox::LayoutBuilder;
 use std::io::Cursor;
 use quick_xml::Writer;
 use minidom::Element;
-
+use std::collections::HashSet;
 
 pub trait XMLElementWriter {
     /// Write an xml element to a string
@@ -157,12 +157,199 @@ pub fn from_element_to_element(src_elem: &Element) -> Result<Element, LayoutErro
         output_element.set_attr(k.to_string(), v.to_string());
     }
     Ok(output_element)
+}
 
+/// Generate a textbox with a background.
+///
+/// This is a wrapper which allows setting a background fill,
+/// padding etc around a produced textbox.
+///
+/// In `from_element_to_element` attributes not used are simply passed through to the resulting `image` tag.
+/// This wrapper, however, collects the attributes `padding`, `x` and `y.` All are compulsory. Any other attributes
+/// not used in the production of a textbox will be applied to the `rect` element instead; these might include, for example,
+/// `style` or `fill`, to be applied to the `rect`.
+///
+/// Imagine a tag like this:
+/// ```xml
+/// <textbox x="0" y="0" width="100" height="100" style="fill: red;" padding="10px">
+/// <markup>Hello!</markup>
+/// </textbox>
+/// ```
+/// The idea is that instead of this:
+/// ```xml
+/// <image x="0" y="0" width="100" height="100" style="fill: red;" padding="10px" xlink:href="[data]"><image/>
+/// ```
+/// You would get this:
+/// ```xml
+/// <g>
+/// <rect x="0" y="0" width="100" height="100" style="fill: red;">
+/// <image x="10" y="10" width="80" height="80" xlink:href="[data]"></image>
+/// </g>
+/// ```
+/// In other words, the new attribute `padding` is used to shrink the textbox produced,
+/// which is then positioned at a location on top of a new `rect` element, created using the `style` attribute,
+/// such that the specified padding in its original box is achieved.
+/// The effect is to give a background to the textbox.
+/// 
+/// Note that the advantage of doing it like this is that the background can be expanded to fit if the
+/// the textbox has variable dimensions. The colour of text itself is not changed, but this can easily be set in
+/// the markup itself.
+///
+/// ## Interpreting `padding`
+/// Padding can only be set as a pixel value, using a plain number to describe it.
+/// 
+/// Syntactically, it mimics css: that is, it can be specified using one, two, three or four positive values.
+/// * One value: apply the same padding to all four sides.
+/// * Two values: apply the first to the top and bottom, the second to the right and left.
+/// * Three values: apply the first to the top, the second to the left and right, and the third to the bottom.
+/// * Four values: apply in clockwise order: top, right, bottom, left.
+///
+pub fn from_backgrounded_element_to_element_group(src_elem: &Element) -> Element {
+    let mut attrs = HashMap::new();
+    for (k, v) in src_elem.attrs() {
+        attrs.insert(k.to_string(), v.to_string());
+    }
+
+    let markup = get_markup(src_elem, &mut attrs).unwrap();
+    let mut input = TextBoxInput::new_from(markup, &mut attrs).unwrap();
+
+    let padding = attrs.remove("padding").unwrap();
+    let x: i32 = attrs.remove("x").unwrap().parse().unwrap();
+    let y: i32 = attrs.remove("y").unwrap().parse().unwrap();
+
+    let ps = PaddingSpecification::new(&padding);
+    let textbox_x = x + ps.left;
+    let textbox_y = y + ps.top;
+
+    let new_dimensions = match input.dimensions {
+            LayoutDimensions::Static(width, height) => {
+                let w = width - (ps.left + ps.right);
+                let h = height - (ps.top + ps.bottom);
+                LayoutDimensions::Static(w, h)
+            },
+            LayoutDimensions::StaticWidthFlexHeight(width, heights) => {
+                let w = width - (ps.left + ps.right);
+                let h: HashSet<i32> = heights.iter().map(|x| x - (ps.top + ps.bottom)).collect();
+                LayoutDimensions::StaticWidthFlexHeight(w, h)
+            },
+            LayoutDimensions::FlexWidthStaticHeight(widths, height) => {
+                let h = height - (ps.top + ps.bottom);
+                let w: HashSet<i32> = widths.iter().map(|x| x - (ps.left + ps.right)).collect();
+                LayoutDimensions::FlexWidthStaticHeight(w, h)
+            },
+            LayoutDimensions::Flex(widths, heights) => {
+                let w: HashSet<i32> = widths.iter().map(|x| x - (ps.left + ps.right)).collect();
+                let h: HashSet<i32> = heights.iter().map(|x| x - (ps.top + ps.bottom)).collect();
+                LayoutDimensions::Flex(w, h)
+            }
+    };
+
+    input.dimensions = new_dimensions;
+    let textbox_output = LayoutBuilder::get_layout_output(&input).unwrap();
+
+
+    let b64 = base64::encode(&textbox_output.rendered);
+    let prefixed_b64 = format!("data:image/svg+xml;base64, {}", b64);
+
+    let mut output_image = Element::builder("image").build();
+    output_image.set_attr("width", textbox_output.width);
+    output_image.set_attr("height", textbox_output.height);
+    output_image.set_attr("xlink:href", prefixed_b64);
+    output_image.set_attr("x", textbox_x);
+    output_image.set_attr("y", textbox_y);
+
+    let mut output_rect = Element::builder("rect").build();
+    let output_width = textbox_output.width + ps.left + ps.right;
+    let output_height = textbox_output.height + ps.top + ps.bottom;
+    output_rect.set_attr("width", output_width);
+    output_rect.set_attr("height", output_height);
+    output_rect.set_attr("x", x);
+    output_rect.set_attr("y", y);
+    for (k, v) in attrs {
+        output_rect.set_attr(k.to_string(), v.to_string());
+    }
+
+    let mut output_group = Element::builder("g").build();
+    output_group.append_child(output_rect);
+    output_group.append_child(output_image);
+    output_group
+}
+
+
+
+struct PaddingSpecification {
+    left: i32,
+    right: i32,
+    top: i32,
+    bottom: i32,
+}
+
+impl PaddingSpecification {
+
+    fn from_vec(mut v: Vec<i32>) -> PaddingSpecification {
+        
+        match v.len() {
+            1 => {
+                let all = v.remove(0);
+                PaddingSpecification {
+                    top: all,
+                    right: all,
+                    bottom: all,
+                    left: all,
+                }
+            },
+            2 => {
+                let top_bottom = v.remove(0);
+                let left_right = v.remove(0);
+
+                PaddingSpecification {
+                    top: top_bottom,
+                    right: left_right,
+                    bottom: top_bottom,
+                    left: left_right,
+                }
+            },
+            3 => {
+                let top = v.remove(0);
+                let right_left = v.remove(1);
+                let bottom = v.remove(2);
+
+                PaddingSpecification {
+                    top: top,
+                    right: right_left,
+                    bottom: bottom,
+                    left: right_left,
+                }
+            },
+            4 => {
+                PaddingSpecification {
+                    top: v.remove(0),
+                    right: v.remove(1),
+                    bottom: v.remove(2),
+                    left: v.remove(3),
+                }
+            },
+            _ => panic!(),
+        } 
+    }
+
+    fn new(src: &str) -> PaddingSpecification {
+        let substrings: Vec<&str> = src.split_whitespace().collect();
+        
+        let results: Vec<i32> = substrings
+            .into_iter().map(
+                |s| {
+                    s.parse().unwrap()
+                })
+            .collect();
+        Self::from_vec(results)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
 
     #[test]
     fn element_to_element() {
