@@ -1,10 +1,6 @@
 use crate::errors::LayoutError;
 use pango::FontMapExt;
 use pango::LayoutExt;
-use glib::translate::*;
-use pango_sys;
-use std::mem;
-
 
 pub trait LayoutBase {
     const DISTANCE_MIN: i32 = 0;
@@ -89,7 +85,6 @@ impl LayoutBase for pango::Layout {
 pub trait LayoutSizing {
     fn fits(&self) -> bool;
     fn grow_to_maximum_font_size(&self, possible_font_sizes: &Vec<i32>) -> Result<i32, LayoutError>;
-    fn last_char_index(&self) -> i32;
     fn change_font_size(&self, new_font_size: i32);
 }
 
@@ -99,38 +94,40 @@ impl LayoutSizing for pango::Layout {
     /// This means that the text is not ellipsized
     /// and no text or part of text ink extents are
     /// outside the box.
-    /// It is important to note that this relies on Pango's
-    /// reporting, which is _not_ necessarily reliable
-    /// when multiple paragraphs are involved.
-    /// Further, more intensive, checks are required to be sure.
     fn fits(&self) -> bool {
         let ellipsized = self.is_ellipsized();
-        let (ink_extents, _) = self.get_extents();
+        let height = self.get_height();
+        let width = self.get_width();
+        let (ink_extents, logical_extents) = self.get_extents();
         let northwest_bounds_exceeded = (ink_extents.x < 0) | (ink_extents.y < 0);
-        let southeast_bounds_exceeded = ((ink_extents.height + ink_extents.y) > self.get_height())
-            | ((ink_extents.width + ink_extents.x) > self.get_width());
+        let southeast_bounds_exceeded = ((ink_extents.height + logical_extents.y) > height)
+            | ((ink_extents.width + logical_extents.x) > width);
+        
+        // Now for the complicated bit.
+        // Pango has a mystery habit of dropping lines
+        // off the end if you let it.
 
-        !(ellipsized | northwest_bounds_exceeded | southeast_bounds_exceeded)
+        // so we check what the index of the char closest
+        // to the bottom right is: as far as I can tell,\
+        // this gets you to the last utf8 byte index;
+        let (_inside, last_char_index, _trailing) = self.xy_to_index(width, height);
+
+        // in an ideal world, we would just compare this last_char_index
+        // to the total character count
+        // and make sure that they were the same.
+        // let reported_char_count = self.get_character_count();
+        // but the character count is _not_ the utf8 bytes count.
+        // We have to get this from the text itself:
+        let text_string = self.get_text()
+                           .unwrap()
+                           .as_str()
+                           .to_string();
+        let dropped_chars = last_char_index != (text_string.len() as i32 -1);
+
+
+        !(ellipsized | northwest_bounds_exceeded | southeast_bounds_exceeded | dropped_chars)
     }
 
-    /// Get the index of the character furthest to the right
-    /// in the last line of this layout.
-    fn last_char_index(&self) -> i32 {
-        let last_line = self.get_line_readonly(self.get_line_count() - 1).unwrap();
-        // don't want to use wrapped version of x_to_index, because we don't care if to the right of the line.
-        let x_pos = self.get_width();
-        unsafe {
-            let mut index_ = mem::uninitialized();
-            let mut trailing = mem::uninitialized();
-            let _ret: bool = from_glib(pango_sys::pango_layout_line_x_to_index(
-                last_line.to_glib_none().0,
-                x_pos,
-                &mut index_,
-                &mut trailing,
-            ));
-            index_
-        }
-    }
 
     /// Change the base font size of this layout.
     /// This will not override the sizes set in the original
@@ -143,16 +140,11 @@ impl LayoutSizing for pango::Layout {
 
     /// Grow this layout to the largest possible font size within `possible_font_sizes`.
     fn grow_to_maximum_font_size(&self, possible_font_sizes: &Vec<i32>) -> Result<i32, LayoutError> {
-        let orig_last_char = self.last_char_index();
 
         let will_fit = |new_font_size| {
             self.change_font_size(new_font_size);
-            // pango occasionally reports fitting when in fact
-            // lines are disappearing off the bottom.
-            // here we check this by seeing if the index of the last
-            // visible grapheme is the same as it was in the beginning.
-            // TODO: this seems to introduce an element of chance?
-            if self.fits() & (self.last_char_index() == orig_last_char) {
+            let fits = self.fits();
+            if fits {
                 std::cmp::Ordering::Less
             } else {
                 std::cmp::Ordering::Greater
@@ -309,7 +301,6 @@ mod tests {
         let poss_sizes = (47..50).collect::<Vec<i32>>();
         let min_font_size = layout.grow_to_maximum_font_size(&poss_sizes);
         assert!(min_font_size.is_err());
-
     }
 
     #[test]
@@ -323,16 +314,17 @@ mod tests {
             None
         )
         .unwrap();
-
-        let poss_sizes = (135..141).collect::<Vec<i32>>();
+        let poss_sizes = (135..145).collect::<Vec<i32>>();
         let changed_font_size = layout.grow_to_maximum_font_size(&poss_sizes).unwrap();
+        println!("{:?}", layout.font_size());
+        println!("{:?}", layout.get_character_count());
         assert_eq!(changed_font_size, 139);
     }
 
     #[test]
     fn lines_drop_3() {
         let layout = pango::Layout::generate_from("SOME TITLE\n――\nSOME AUTHOR\n<span size=\"smaller\"><span style=\"italic\">Edited by</span>\nSOME EDITOR</span>", 2000, 2000, pango::Alignment::Center, &pango::FontDescription::new(), None).unwrap();
-        let poss_sizes = (190..200).collect::<Vec<i32>>();
+        let poss_sizes = (185..195).collect::<Vec<i32>>();
         let changed_font_size = layout.grow_to_maximum_font_size(&poss_sizes).unwrap();
         assert_eq!(changed_font_size, 192);
     }
@@ -345,6 +337,12 @@ mod tests {
         font_desc.set_size(large_pt);
         let l = pango::Layout::generate_from(markup, 100, 100, pango::Alignment::Left, &font_desc, None).unwrap();
         assert!(!l.fits());
+    }
+
+    #[test]
+    fn test_fits_reporting() {
+        let l = pango::Layout::generate_from("<markup><span foreground=\"#FFFFFF\" weight=\"500\">SOME TITLE</span>\n<span foreground=\"#FFFFFF\" weight=\"400\">SOME AUTHOR</span></markup>", 1998, 1198, pango::Alignment::Right, &pango::FontDescription::from_string("Reforma 2018"), Some(40)).unwrap();
+        assert!(l.fits());
     }
 
 
