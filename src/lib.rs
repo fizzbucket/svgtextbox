@@ -120,7 +120,7 @@ mod input;
 mod textbox;
 mod xml_support;
 
-pub use xml_support::{from_element_to_element, from_backgrounded_element_to_element_group};
+pub use xml_support::{from_element_to_element, from_backgrounded_element_to_element_group, from_subelements_to_svg_image};
 pub use input::{TextBoxInput, LayoutDimensions, FontSizing};
 pub use textbox::LayoutBuilder;
 pub use output::LayoutOutput;

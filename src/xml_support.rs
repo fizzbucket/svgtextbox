@@ -386,9 +386,112 @@ impl PaddingSpecification {
     }
 }
 
+/// Given an xml string potentially containing textbox elements,
+/// convert all of these as part of a new svg image, preserving
+/// non-textbox elements.
+pub fn from_subelements_to_svg_image(xml: &str) -> Result<String, LayoutError> {
+    let mut root: Element = xml.parse()?;
+    let width = match root.attr("width") {
+        Some(x) => x.to_owned(),
+        None => return Err(LayoutError::XMLRequiredAttributeMissing{msg: String::from("width")})
+    };
+    let height = match root.attr("height") {
+        Some(x) => x.to_owned(),
+        None => return Err(LayoutError::XMLRequiredAttributeMissing{msg: String::from("height")})
+    };
+    let mut replacement_root = Element::builder("svg")
+        .attr("xmlns", "http://www.w3.org/2000/svg")
+        .attr("xmlns:xlink", "http://www.w3.org/1999/xlink")
+        .attr("width", "100%")
+        .attr("viewBox", &format!("0 0 {} {}", width, height))
+        .attr("version", "1.1")
+        .build();
+    for elem in root.children_mut() {
+        match elem.name() {
+            "textbox" => {
+                let replacement_elem = match elem.attr("padding") {
+                    Some(_) => from_backgrounded_element_to_element_group(elem)?,
+                    None => from_element_to_element(elem)?,
+                };
+                replacement_root.append_child(replacement_elem);
+            },
+            _ => {
+                replacement_root.append_child(elem.clone());
+            }
+        }
+    }
+    replacement_root.write()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_subelements() {
+        let eg = 
+            r#"<?xml version="1.0" encoding="utf-8"?>
+            <svg width="2000" height="4000">
+                <span>Before</span>
+                <textbox x="500" y="0" width="2000" height="2000">
+                    <markup>
+                        Hello World
+                    </markup>
+                </textbox>
+                <span>Inbetween</span>
+                <textbox x="500" y="2500" padding="100" height="1500" width="2000" fill="blue">
+                    <markup>
+                        I'm back
+                    </markup>
+                </textbox>
+                <span>After</span>
+            </svg>
+            "#;
+        let result = from_subelements_to_svg_image(eg).unwrap();
+        let mut parsed_result: Element = result.parse().unwrap();
+        assert_eq!(parsed_result.attr("viewBox").unwrap(), "0 0 2000 4000");
+        
+        let mut kids = parsed_result.children_mut();
+        let first_span = kids.next().unwrap();
+        let first_textbox = kids.next().unwrap();
+        let second_span = kids.next().unwrap();
+        let second_textbox_g = kids.next().unwrap();
+        let third_span = kids.next().unwrap();
+
+        assert_eq!(first_span.name(), "span");
+        assert_eq!(first_textbox.name(), "image");
+        assert_eq!(second_span.name(), "span");
+        assert_eq!(second_textbox_g.name(), "g");
+        assert_eq!(third_span.name(), "span");
+
+        assert_eq!(first_span.texts().next().unwrap(), "Before");
+        assert_eq!(second_span.texts().next().unwrap(), "Inbetween");
+        assert_eq!(third_span.texts().next().unwrap(), "After");
+
+        assert_eq!(first_textbox.attr("width").unwrap(), "2000");
+        assert_eq!(first_textbox.attr("height").unwrap(), "2000");
+        assert_eq!(first_textbox.attr("x").unwrap(), "500");
+        assert_eq!(first_textbox.attr("y").unwrap(), "0");
+
+        assert_eq!(second_textbox_g.name(), "g");
+        let mut g_kids = second_textbox_g.children();
+        let second_textbox_rect = &g_kids.next().unwrap();
+        let second_textbox = &g_kids.next().unwrap();
+
+        assert_eq!(second_textbox_rect.name(), "rect");
+        assert_eq!(second_textbox_rect.attr("width").unwrap(), "2000");
+        assert_eq!(second_textbox_rect.attr("height").unwrap(), "1500");
+        assert_eq!(second_textbox_rect.attr("x").unwrap(), "500");
+        assert_eq!(second_textbox_rect.attr("y").unwrap(), "2500");
+        assert_eq!(second_textbox_rect.attr("fill").unwrap(), "blue");
+
+        assert_eq!(second_textbox.name(), "image");
+        assert_eq!(second_textbox.attr("width").unwrap(), "1800");
+        assert_eq!(second_textbox.attr("height").unwrap(), "1300");
+        assert_eq!(second_textbox.attr("x").unwrap(), "600");
+        assert_eq!(second_textbox.attr("y").unwrap(), "2600");
+
+    }
 
 
     #[test]
