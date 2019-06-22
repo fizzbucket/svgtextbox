@@ -175,7 +175,7 @@ pub fn from_element_to_element(src_elem: &Element) -> Result<Element, LayoutErro
 ///
 /// Imagine a tag like this:
 /// ```xml
-/// <textbox x="0" y="0" width="100" height="100" style="fill: red;" padding="10px">
+/// <textbox x="0" y="0" width="100" height="100" style="fill: red;" padding="10">
 /// <markup>Hello!</markup>
 /// </textbox>
 /// ```
@@ -444,11 +444,6 @@ mod tests {
     }
 
     #[test]
-    fn test_get_padding() {
-        unimplemented!();
-    }
-
-    #[test]
     fn adding_border() {
         let top_bordered: Element = "<textbox padding=\"0\" x=\"0\" y=\"0\" font-size=\"10\" width=\"100\" height=\"100\" border-top=\"#000000\"><markup>With border</markup></textbox>".parse().unwrap();
         let bottom_bordered: Element = "<textbox padding=\"0\" x=\"0\" y=\"0\" font-size=\"10\" width=\"100\" height=\"100\" border-bottom=\"#000000\"><markup>With border</markup></textbox>".parse().unwrap();
@@ -478,7 +473,10 @@ mod tests {
 
     #[test]
     fn with_fill() {
-        unimplemented!();
+        let elem: Element = "<textbox padding=\"10\" x=\"0\" y=\"0\" font-size=\"10\" width=\"100\" height=\"100\" fill=\"red\"><markup>Hello World</markup></textbox>".parse().unwrap();
+        let result = from_backgrounded_element_to_element_group(&elem).unwrap();
+        let rect = result.iter_search("rect").unwrap();
+        assert_eq!(rect.attr("fill").unwrap(), "red");
     }
 
 
