@@ -381,7 +381,7 @@ mod tests {
     	for i in 10..=20 {
     		assert!(range_parsed.contains(&i));
     	}
-    	assert!((inverted_range_parsed.len() == 2) & inverted_range_parsed.contains(&20) and inverted_range_parsed.contains(&20));
+    	assert!((inverted_range_parsed.len() == 2) && inverted_range_parsed.contains(&20) && inverted_range_parsed.contains(&20));
 
    	}
 

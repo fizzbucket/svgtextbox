@@ -161,11 +161,15 @@ pub fn from_element_to_element(src_elem: &Element) -> Result<Element, LayoutErro
 
 /// Generate a textbox with a background.
 ///
-/// This is a wrapper which allows setting a background fill,
-/// padding etc around a produced textbox.
+/// This is a wrapper which allows setting a background, fill,
+/// padding, seperators after etc around a produced textbox.
 ///
 /// In `from_element_to_element` attributes not used are simply passed through to the resulting `image` tag.
-/// This wrapper, however, collects the attributes `padding`, `x` and `y.` All are compulsory. Any other attributes
+/// This wrapper, however, collects the attributes `padding`, `x` and `y.` All are compulsory.
+/// The optional attributes "border-top" and "border-bottom" [= hex of border colour], as well as "border-width" = [int]
+/// will also be used to draw a line functioning as a border if present.
+/// TODO: add seperator line.
+/// Any other attributes
 /// not used in the production of a textbox will be applied to the `rect` element instead; these might include, for example,
 /// `style` or `fill`, to be applied to the `rect`.
 ///
@@ -273,6 +277,11 @@ pub fn from_backgrounded_element_to_element_group(src_elem: &Element) -> Result<
     output_rect.set_attr("height", output_height);
     output_rect.set_attr("x", x);
     output_rect.set_attr("y", y);
+    
+    let border_width = attrs.remove("border-width");
+    let border_top = attrs.remove("border-top");
+    let border_bottom = attrs.remove("border-bottom");
+
     for (k, v) in attrs {
         output_rect.set_attr(k.to_string(), v.to_string());
     }
@@ -280,6 +289,31 @@ pub fn from_backgrounded_element_to_element_group(src_elem: &Element) -> Result<
     let mut output_group = Element::builder("g").build();
     output_group.append_child(output_rect);
     output_group.append_child(output_image);
+
+    if let Some(colour) = border_top {
+        let mut top_border = Element::builder("line").build();
+        top_border.set_attr("stroke", colour);
+        top_border.set_attr("x1", x);
+        top_border.set_attr("x2", x + output_width);
+        top_border.set_attr("y1", y);
+        top_border.set_attr("y2", y);
+        if let Some(w) = &border_width {
+            top_border.set_attr("stroke-width", w);
+        }
+        output_group.append_child(top_border);
+    };
+    if let Some(colour) = border_bottom {
+        let mut bottom_border = Element::builder("line").build();
+        bottom_border.set_attr("stroke", colour);
+        bottom_border.set_attr("x1", x);
+        bottom_border.set_attr("x2", x + output_width);
+        bottom_border.set_attr("y1", y + output_height);
+        bottom_border.set_attr("y2", y + output_height);
+        if let Some(w) = &border_width {
+            bottom_border.set_attr("stroke-width", w);
+        }
+        output_group.append_child(bottom_border);
+    };
     Ok(output_group)
 }
 
@@ -319,8 +353,8 @@ impl PaddingSpecification {
             },
             3 => {
                 let top = v.remove(0);
-                let right_left = v.remove(1);
-                let bottom = v.remove(2);
+                let right_left = v.remove(0);
+                let bottom = v.remove(0);
 
                 PaddingSpecification {
                     top: top,
@@ -332,9 +366,9 @@ impl PaddingSpecification {
             4 => {
                 PaddingSpecification {
                     top: v.remove(0),
-                    right: v.remove(1),
-                    bottom: v.remove(2),
-                    left: v.remove(3),
+                    right: v.remove(0),
+                    bottom: v.remove(0),
+                    left: v.remove(0),
                 }
             },
             _ => return Err(LayoutError::Generic),
@@ -376,6 +410,76 @@ mod tests {
         assert!(from_element_to_element(&dodgy).is_err());
     }
 
+    #[test]
+    fn test_padding_from_vec() {
+        let single = PaddingSpecification::from_vec(vec![1]).unwrap();
+        let double = PaddingSpecification::from_vec(vec![1, 2]).unwrap();
+        let triple = PaddingSpecification::from_vec(vec![1, 2, 3]).unwrap();
+        let quadruple = PaddingSpecification::from_vec(vec![1, 2, 3, 4]).unwrap();
+        let empty = PaddingSpecification::from_vec(Vec::new());
+        let too_long = PaddingSpecification::from_vec(vec![1, 2, 3, 4, 5]);
+
+        assert!(empty.is_err());
+        assert!(too_long.is_err());
+
+        assert_eq!(single.top, 1);
+        assert_eq!(single.right, 1);
+        assert_eq!(single.bottom, 1);
+        assert_eq!(single.left, 1);
+
+        assert_eq!(double.top, 1);
+        assert_eq!(double.right, 2);
+        assert_eq!(double.bottom, 1);
+        assert_eq!(double.left, 2);
+        
+        assert_eq!(triple.top, 1);
+        assert_eq!(triple.right, 2);
+        assert_eq!(triple.bottom, 3);
+        assert_eq!(triple.left, 2);
+
+        assert_eq!(quadruple.top, 1);
+        assert_eq!(quadruple.right, 2);
+        assert_eq!(quadruple.bottom, 3);
+        assert_eq!(quadruple.left, 4);
+    }
+
+    #[test]
+    fn test_get_padding() {
+        unimplemented!();
+    }
+
+    #[test]
+    fn adding_border() {
+        let top_bordered: Element = "<textbox padding=\"0\" x=\"0\" y=\"0\" font-size=\"10\" width=\"100\" height=\"100\" border-top=\"#000000\"><markup>With border</markup></textbox>".parse().unwrap();
+        let bottom_bordered: Element = "<textbox padding=\"0\" x=\"0\" y=\"0\" font-size=\"10\" width=\"100\" height=\"100\" border-bottom=\"#000000\"><markup>With border</markup></textbox>".parse().unwrap();
+        let with_stroke_width: Element = "<textbox padding=\"0\" x=\"0\" y=\"0\" font-size=\"10\" width=\"100\" height=\"100\" border-bottom=\"#000000\" border-width=\"20\"><markup>With border</markup></textbox>".parse().unwrap();
+
+        let a_ = from_backgrounded_element_to_element_group(&top_bordered).unwrap();
+        let a = a_.iter_search("line").unwrap();
+        let b_ = from_backgrounded_element_to_element_group(&bottom_bordered).unwrap();
+        let b = b_.iter_search("line").unwrap();
+        let c_ = from_backgrounded_element_to_element_group(&with_stroke_width).unwrap();
+        let c = c_.iter_search("line").unwrap();
+
+        assert_eq!(a.attr("x1").unwrap(), "0");
+        assert_eq!(a.attr("x2").unwrap(), "100");
+        assert_eq!(a.attr("y1").unwrap(), "0");
+        assert_eq!(a.attr("y2").unwrap(), "0");
+
+        assert_eq!(b.attr("x1").unwrap(), "0");
+        assert_eq!(b.attr("x2").unwrap(), "100");
+        assert_eq!(b.attr("y1").unwrap(), "100");
+        assert_eq!(b.attr("y2").unwrap(), "100");
+
+        assert_eq!(c.attr("stroke-width").unwrap(), "20");
+
+    }
+
+
+    #[test]
+    fn with_fill() {
+        unimplemented!();
+    }
 
 
     #[test]
