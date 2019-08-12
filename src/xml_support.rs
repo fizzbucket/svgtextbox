@@ -46,6 +46,7 @@ impl XMLElementIterSearch for Element {
 /// * _all_ whitespace is normalised to non-continguous spaces.
 /// * spaces immediately after a tag opening angle bracket or before a tag closing angle bracket are removed.
 /// * &lt;br/&gt; tags are replaced with a newline character.
+/// * &lt;preserved-space/&gt; tags are replaced with a single space
 ///
 /// ```xml
 /// <span>
@@ -71,10 +72,13 @@ pub fn trim_insignificant_whitespace(s: &str) -> String {
     let tags_joined = joined_whitespace
                         .replace("> ", ">")
                         .replace(" <", "<");
-    let newlines_added = tags_joined
+    let spaces_added = tags_joined
                             .replace("<br/>", "\n")
-                            .replace("<br />", "\n");
-    newlines_added
+                            .replace("<br />", "\n")
+                            .replace("<preserved-space/>", " ")
+                            .replace("<preserved-space />", " ");
+
+    spaces_added
 }
 
 fn get_markup(src_elem: &Element, attrs: &mut HashMap<String, String>) -> Result<String, LayoutError> {
@@ -618,6 +622,8 @@ mod tests {
         assert_eq!(trim_insignificant_whitespace("<span>A B</span>"), "<span>A B</span>");
         assert_eq!(trim_insignificant_whitespace("<span>A <br/> B</span>"), "<span>A\nB</span>");
         assert_eq!(trim_insignificant_whitespace("<span>\n\tOuter\n\t<span>\n\t\tInner\n\t</span>\n</span>"), "<span>Outer<span>Inner</span></span>");
+        assert_eq!(trim_insignificant_whitespace("<span>A<preserved-space/><span style=\"italic\">and</span><preserved-space />B</span>"), "<span>A <span style=\"italic\">and</span> B</span>");
+
     }
 
 
@@ -659,7 +665,6 @@ mod tests {
         let missing_markup: Element = r#"<textbox width="100" height="100"></textbox>"#.parse().unwrap();
         let mm = from_element_to_element(&missing_markup);
         assert!(mm.is_err());
-
     }
 
 
