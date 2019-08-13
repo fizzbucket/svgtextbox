@@ -81,6 +81,12 @@ pub fn trim_insignificant_whitespace(s: &str) -> String {
     spaces_added
 }
 
+pub fn add_dividers(s: &str) -> String {
+    let divider = "<span font-family=\"Spectral\">―――</span>";
+    s.replace("<divider/>", divider)
+     .replace("<divider />", divider)
+}
+
 fn get_markup(src_elem: &Element, attrs: &mut HashMap<String, String>) -> Result<String, LayoutError> {
 
 	let mut markup = match src_elem.iter_search("markup") {
@@ -98,6 +104,9 @@ fn get_markup(src_elem: &Element, attrs: &mut HashMap<String, String>) -> Result
             }
         }
     }
+
+    markup = add_dividers(&markup);
+
     Ok(markup)
 } 
 
@@ -575,6 +584,16 @@ mod tests {
 
         assert_eq!(c.attr("stroke-width").unwrap(), "20");
 
+    }
+
+    #[test]
+    fn divider() {
+        let testcases = ["<textbox><markup><span>Hello<br/><divider/><br/>World</span></markup></textbox>", "<textbox><markup><span>Hello<br/><divider /><br/>World</span></markup></textbox>"];
+        for s in testcases.iter() {
+            let xml: Element = s.parse().unwrap();
+            let out = get_markup(&xml, &mut HashMap::new()).unwrap();
+            assert_eq!(out, "<markup><span>Hello\n<span font-family=\"Spectral\">―――</span>\nWorld</span></markup>");
+        }
     }
 
 
