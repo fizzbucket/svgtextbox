@@ -1,6 +1,6 @@
 use crate::errors::LayoutError;
 use pango::FontMapExt;
-use pango::LayoutExt;
+use pango::Layout;
 
 pub trait LayoutBase {
     const DISTANCE_MIN: i32 = 0;
@@ -48,7 +48,7 @@ impl LayoutBase for pango::Layout {
 
         let layout = pango::Layout::generate();
 
-        layout.set_font_description(font_desc);
+        layout.set_font_description(Some(font_desc));
         
         // It's conceivable that we were given an explicit
         // font size but not a font description set to it already.
@@ -58,7 +58,7 @@ impl LayoutBase for pango::Layout {
             let mut fetched_fd = layout.get_font_description().unwrap();
             if fetched_fd.get_size() != scaled_font_size {
                 fetched_fd.set_size(scaled_font_size);
-                layout.set_font_description(&fetched_fd);
+                layout.set_font_description(Some(&fetched_fd));
             }
         }
         layout.set_ellipsize(pango::EllipsizeMode::End);
@@ -135,7 +135,7 @@ impl LayoutSizing for pango::Layout {
     fn change_font_size(&self, new_font_size: i32) {
         let mut font_desc: pango::FontDescription = self.get_font_description().unwrap_or_default();
         font_desc.set_size(new_font_size);
-        self.set_font_description(&font_desc);
+        self.set_font_description(Some(&font_desc));
     }
 
     /// Grow this layout to the largest possible font size within `possible_font_sizes`.

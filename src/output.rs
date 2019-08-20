@@ -1,5 +1,5 @@
-use pango::LayoutExt;
-use cairo::prelude::*;
+use pango::Layout;
+use cairo;
 
 pub trait LayoutWrite {
     fn as_bytes(&self) -> Vec<u8>;
@@ -9,6 +9,7 @@ pub trait LayoutWrite {
     fn px_width(&self) -> i32;
     fn calculate_top_padding(&self) -> i32;
     fn to_output(&self) -> LayoutOutput;
+    fn write_to_file<P: AsRef<std::path::Path>>(&self, p: P) -> Result<(), std::io::Error>;
 }
 
 impl LayoutWrite for pango::Layout {
@@ -52,13 +53,17 @@ impl LayoutWrite for pango::Layout {
     fn as_bytes(&self) -> Vec<u8> {
 
         let mut writable = Vec::new();
-        let surface = cairo::svg::RefWriter::new(self.pts_width(), self.pts_height(), &mut writable);
+        let surface = cairo::SvgSurface::for_stream(self.pts_width(), self.pts_height(), writable);
         let context = cairo::Context::new(&surface);
         context.move_to(0.0, f64::from(self.calculate_top_padding() / pango::SCALE));
         pangocairo::functions::show_layout(&context, self);
-        surface.finish();
+        let o = surface.finish_output_stream().unwrap();
+        o.downcast::<Vec<u8>>().unwrap().to_vec()
+    }
 
-        writable
+    fn write_to_file<P: AsRef<std::path::Path>>(&self, p: P) -> Result<(), std::io::Error> {
+        let b = self.as_bytes();
+        std::fs::write(p, b)
     }
 
     fn to_output(&self) -> LayoutOutput {
@@ -67,7 +72,6 @@ impl LayoutWrite for pango::Layout {
             height: self.px_height(),
             width: self.px_width(),
         }
-
     }
 }
 

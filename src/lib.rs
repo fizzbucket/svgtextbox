@@ -46,6 +46,8 @@
 //! let height = rendered_layout.height;
 //! // Because the text would not fit at 25px, the textbox used a height of 50px instead.
 //! assert_eq!(height, 50);
+//! let svg_string = std::str::from_utf8(&layout_bytes).unwrap();
+//!
 //!```
 //! But it is equally possible to grow text to fit a textbox (and, of course, the two approaches can be combined).
 //!
