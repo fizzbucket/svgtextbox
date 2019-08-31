@@ -1,128 +1,259 @@
-//! # svgtextbox
-//!
-//! `svgtextbox` creates svg images
-//! of a particular size containing formatted text.
-//!
-//! Its most useful feature is the ability to
-//! size text automatically to fill up as much space
-//! as possible without exceeding the image size, but it
-//! also leverages pango's rust bindings to allow for
-//! complex textual formatting.
-//!
-//! It was originally written to aid in the automatic creation of
-//! book covers, but might be useful for anyone trying to automatically
-//! do complicated text layout in images.
-//!
-//! It adds very few capabilities to what could be done with pango anyway,
-//! but hopefully is substantially easier to use.
-//!
-//! # Examples
-//! 
-//! You can expand a textbox to fit static text:
-//!
-//! ```
-//! # use svgtextbox::{LayoutDimensions, FontSizing, TextBoxInput, LayoutBuilder};
-//! # use std::collections::HashSet;
-//!
-//! // Have a width of 100 px, but a height of either 25 or 50px;
-//! let possible_heights: HashSet<i32> = vec![25, 50].into_iter().collect();
-//! let dimensions = LayoutDimensions::StaticWidthFlexHeight(100, possible_heights);
-//! // Use a fixed font size of 12pts.
-//! let fontsizing = FontSizing::Static(12);
-//!
-//! let input = TextBoxInput {
-//!		markup: "Hello World".to_string(),
-//!		dimensions,
-//!		alignment: pango::Alignment::Left,
-//!		fontsizing,
-//!		font_desc: pango::FontDescription::new()
-//! };
-//!
-//! let rendered_layout = LayoutBuilder::get_layout_output(&input).unwrap();
-//!
-//! // The textbox as a rendered svg. 
-//! let layout_bytes = rendered_layout.rendered;
-//! // The height of the layout as it was rendered.
-//! let height = rendered_layout.height;
-//! // Because the text would not fit at 25px, the textbox used a height of 50px instead.
-//! assert_eq!(height, 50);
-//! let svg_string = std::str::from_utf8(&layout_bytes).unwrap();
-//!
-//!```
-//! But it is equally possible to grow text to fit a textbox (and, of course, the two approaches can be combined).
-//!
-//! ```
-//! # use svgtextbox::{LayoutDimensions, FontSizing, TextBoxInput, LayoutBuilder};
-//! # use std::collections::HashSet;
-//! // Specify textbox of 200 x 200px:
-//! let dimensions = LayoutDimensions::Static(200, 200);
-//! // The text will be set in the largest of these sizes that fits:
-//! let fontsizing = FontSizing::Selection(vec![10, 20, 30, 40, 50, 60]);
-//! let input = TextBoxInput {
-//!		markup: "Hello World".to_string(),
-//!		dimensions,
-//!		alignment: pango::Alignment::Left,
-//!		fontsizing,
-//!		font_desc: pango::FontDescription::new()
-//! };
-//! let rendered_layout = LayoutBuilder::get_layout_output(&input).unwrap();
-//!```
-//!
-//! Another method to specify a textbox is as an xml element.
-//! This should have the following form:
-//! ```xml
-//! <textbox width="100" height="100">
-//!     <markup>
-//!         [pango-like markup]
-//!     </markup>
-//! </textbox>
-//! ```
-//! The output will be, in string form:
-//! ```xml
-//! <image width="100" height="100" xlink:href="[textbox as base64]"></image>
-//! ```
-//!
-//! Further control is enabled by adding optional attributes to the `textbox` element;
-//! see the documentation for `from_element_to_element` for details.
-//!
-//! # XML usage example
-//! ```
-//! # use svgtextbox::from_element_to_element;
-//! extern crate minidom;
-//! use minidom::Element;
-//!
-//! // Because xml is likely to have meaningless indentation, all whitespace is normalised.
-//! // We include a <br/> element to indicate a newline that should be preserved.
-//! // If we were to include the attribute "preserve-whitespace"="true", whitespace would be preserved,
-//! // but the <br/> element would cause an error.
-//! let example_xml = r#"
-//! 	<textbox x="0" width="300" height="300" font-family="Open Sans">
-//! 		<markup>
-//! 			<span font-weight="bold" font-size="larger"> Title </span>
-//! 			<br/>
-//! 			A paragraph of following text at a normal weight and size.
-//! 		</markup>
-//!		</textbox>
-//! 	"#;
-//! let elem_in: Element = example_xml.parse().unwrap();
-//! let elem_out = from_element_to_element(&elem_in).unwrap();
-//! assert_eq!(elem_out.attr("x").unwrap(), "0");
-//! assert!(elem_out.attr("xlink:href").is_some());
-//! ```
-
-#[macro_use]
-mod utils;
-#[macro_use]
-mod enum_matches;
-mod layout;
-
-mod errors;
-mod output;
-mod input;
-mod textbox;
 mod xml_support;
+mod layout;
+mod fontsizing;
+mod pango_interactions;
+mod utils;
+mod textbox;
+mod padded_textbox;
 
-pub use xml_support::{from_element_to_element, from_backgrounded_element_to_element_group, from_subelements_to_svg_image};
-pub use input::{TextBoxInput, LayoutDimensions, FontSizing};
-pub use textbox::LayoutBuilder;
-pub use output::LayoutOutput;
+pub use textbox::{TextBox, Length};
+pub use padded_textbox::{PaddedTextBox, PaddingSpecification};
+pub use pango_interactions::{PangoCompatibleString, FontDescriptionWrapper};
+pub use fontsizing::FontSizing;
+pub use xml_support::transform_xml;
+
+
+
+
+// struct PaddingSpecification {
+//     left: u16,
+//     right: u16,
+//     top: u16,
+//     bottom: u16
+// }
+
+// struct HexColour(String);
+
+
+
+
+
+
+
+// macro_rules! errinator {
+//     ($name:ident, $msg:expr) => {
+//         impl std::fmt::Display for $name {
+//             fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+//                 write!(f, "{:?}", self)
+//             }
+//         }
+
+//         impl Error for $name {
+//             fn source(&self) -> Option<&(dyn Error + 'static)> {
+//                 None
+//             }
+//         }
+//     };
+// }
+
+
+// pub fn alignment_default() -> pango::Alignment {
+//     pango::Alignment::Center
+// }
+
+
+// #[derive(Debug, Clone)]
+// enum LayoutError {
+//     SizingError,
+//     BadConversion,
+// }
+
+
+
+
+
+// errinator!(LayoutError, "Error rendering a layout from textbox");
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// #[derive(Debug, Deserialize)]
+// pub struct PaddedTextBox {
+//     textbox: TextBox,
+//     padding: PaddingSpecification,
+//     x: u32,
+//     y: u32,
+//     border_width: Option<u16>,
+//     border_top: Option<HexColour>,
+//     border_bottom: Option<HexColour>,
+//     #[serde(flatten)]
+//     other: HashMap<String, Value>
+// }
+
+
+
+
+
+// fn to_pango_scale<T>(n: T) -> i32
+// where
+//     i32: std::convert::From<T>,
+// {
+//     i32::from(n) * pango::SCALE
+// }
+
+
+
+// #[cfg(test)]
+// mod tests {
+
+//     use super::*;
+
+//     #[test]
+//     fn test_from_strs() {
+//     	let fontsize_cases = [
+//     		("100", FontSizing::Static(100)),
+//     		("100 103", FontSizing::Flex(vec![100, 101, 102, 103].into_iter().collect())),
+//     		("200 100", FontSizing::Flex(vec![200, 100].into_iter().collect())),
+//     		("100 200 300", FontSizing::Flex(vec![100, 200, 300].into_iter().collect()))
+//     	];
+
+//     	for (i, e) in fontsize_cases.iter() {
+//     		assert_eq!(i.parse::<FontSizing>().unwrap(), *e);
+//     	}
+
+//     	let length_cases = [
+//     		("100", Length::Static(100)),
+//     		("100 200", Length::Flex(vec![200, 100].into_iter().collect())),
+//     		("100 200 300", Length::Flex(vec![100, 200, 300].into_iter().collect()))
+//     	];
+
+//     	for (i, e) in length_cases.iter() {
+//     		assert_eq!(i.parse::<Length>().unwrap(), *e);
+//     	}
+//     }
+
+//     #[test]
+//     fn v16() {
+//     	let testcases = [
+//     		("100", vec![100]),
+//     		("100 200", vec![100, 200]),
+//     		("100 200 300", vec![100, 200, 300])
+//     	];
+
+//     	let bad = [
+//     		"100 two hundred",
+//     		"65536",
+//     	];
+
+//     	for (input, expected_output) in testcases.iter() {
+//     		assert_eq!(vec_u16_from_str(input).unwrap(), *expected_output);
+//     	}
+
+//     	for (input) in bad.iter() {
+//     		assert!(vec_u16_from_str(input).is_err());
+//     	}
+
+//     }
+
+//     #[test]
+//     fn deser() {
+//         let minimal = r#"{
+//     		markup: Hello World,
+//     		width: 100,
+//     		height: [100, 200, 300],
+//     		font_size: {min: 10, max: 12},
+//     		font_desc: "Sans 10"
+//     	}"#;
+
+//         let m: TextBox = serde_yaml::from_str(minimal).unwrap();
+//         assert_eq!(m.markup, PangoCompatibleString("Hello World".to_string()));
+//         let l = vec![(100, 100), (100, 200), (100, 300)]
+//             .iter()
+//             .map(|(w, h)| (*w, *h))
+//             .collect::<Vec<(i32, i32)>>();
+//         assert_eq!(m.possible_layout_dimensions(), l);
+//         assert_eq!(m.font_size.to_vec(), vec![10, 11, 12]);
+//         assert_eq!(
+//             m.font_desc.as_ref().get_family().map(|g| g.to_string()),
+//             Some("Sans".to_string())
+//         );
+//     }
+
+//     #[test]
+//     fn possible_dimensions() {
+//         let mut testcases = std::collections::HashMap::new();
+
+//         testcases.insert(
+//             ("100", "[100, 200, 300]"),
+//             vec![(100, 100), (100, 200), (100, 300)],
+//         );
+
+//         testcases.insert(
+//             ("[100, 200, 300]", "100"),
+//             vec![(100, 100), (200, 100), (300, 100)],
+//         );
+
+//         testcases.insert(
+//             ("[100, 200]", "[100, 200]"),
+//             vec![(100, 100), (100, 200), (200, 100), (200, 200)],
+//         );
+
+//         testcases.insert(
+//             ("[100, 200]", "[100, 200, 300]"),
+//             vec![
+//                 (100, 100),
+//                 (100, 200),
+//                 (100, 300),
+//                 (200, 100),
+//                 (200, 200),
+//                 (200, 300),
+//             ],
+//         );
+
+//         testcases.insert(
+//             ("[100, 200, 300]", "[100, 200]"),
+//             vec![
+//                 (100, 100),
+//                 (100, 200),
+//                 (200, 100),
+//                 (200, 200),
+//                 (300, 100),
+//                 (300, 200),
+//             ],
+//         );
+
+//         for ((width, height), target) in testcases.iter() {
+//             let input = format!(
+//                 "{{markup: Hello World,
+// 		    		width: {},
+// 		    		height: {},
+// 		    		font_size: 10
+// 		    	}}",
+//                 width, height
+//             );
+//             let instance: TextBox = serde_yaml::from_str(&input).unwrap();
+//             let cmp = target
+//                 .iter()
+//                 .map(|(w, h)| (*w, *h))
+//                 .collect::<Vec<(i32, i32)>>();
+//             assert_eq!(instance.possible_layout_dimensions(), cmp);
+//         }
+//     }
+
+//     #[test]
+//     fn test_fontsizing() {
+//         let a = ("10", vec![10]);
+//         let b = ("[10, 20, 30]", vec![10, 20, 30]);
+//         let c = ("{min: 10, max: 20}", (10..=20).collect::<Vec<u16>>());
+//         let d = ("{min: 10, max: 20, step: 2}", vec![10, 12, 14, 16, 18, 20]);
+
+//         for (s, expected) in [a, b, c, d].iter() {
+//             let f: FontSizing = serde_yaml::from_str(s).unwrap();
+//             assert_eq!(&f.to_vec(), expected);
+//         }
+//     }
+// }

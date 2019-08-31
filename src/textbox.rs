@@ -1,211 +1,323 @@
-use crate::input::{FontSizing, LayoutDimensions};
-use crate::layout::{LayoutBase, LayoutSizing};
-use crate::errors::LayoutError;
-use crate::input::TextBoxInput;
-use crate::output::LayoutOutput;
-use crate::output::LayoutWrite;
+pub use lengths::Length;
+pub use tb::TextBox;
 
-/// Build and render a layout from an input.
-pub struct LayoutBuilder<'a> {
-	input: &'a TextBoxInput,
-}
+mod lengths {
 
+	use std::num::ParseIntError;
+	use crate::utils::vec_from_str;
+	use serde::{Serialize, Deserialize};
+	use std::collections::HashSet;
+	use pango::SCALE;
+	use std::convert::TryFrom;
+	use std::str::FromStr;
 
-impl <'a> LayoutBuilder<'a> {
-
-	pub fn get_layout_output(input: &TextBoxInput) -> Result<LayoutOutput, LayoutError> {
-		let lb = LayoutBuilder{input};
-		let layout = lb.to_layout()?;
-		Ok(layout.to_output())
+	/// Represent either a single length
+	/// or a number of possible lengths
+	#[derive(Debug, Serialize, Deserialize, PartialEq)]
+	#[serde(untagged)]
+	pub enum Length {
+	    /// a single length
+	    Static(u16),
+	    /// multiple possible lengths
+	    Flex(HashSet<u16>),
 	}
 
-    fn _generate_layout(&self, width: &i32, height: &i32, explicit_font_size: Option<i32>) -> Result<pango::Layout, LayoutError> {
-        
-        let layout = pango::Layout::generate_from(&self.input.markup, *width, *height, self.input.alignment, &self.input.font_desc, explicit_font_size)?;
+	impl Length {
 
-        if let FontSizing::Selection(sizes) = &self.input.fontsizing {
-                layout.grow_to_maximum_font_size(&sizes)?;
-        };
+		fn from_str(s: &str) -> Result<Self, ParseIntError> {
+			let v = vec_from_str::<u16>(s)?;
+			Ok(Length::from_vec(v))
+		}
 
-        Ok(layout)
-    }
+		fn from_vec<T>(v: Vec<T>) -> Self where
+			T: Clone,
+			u16: From<T>
+			{
+			let v: Vec<u16> = v.iter()
+				.cloned()
+				.map(u16::from)
+				.collect();
 
-    fn to_layout(&self) -> Result<pango::Layout, LayoutError>{
+			match v.len() {
+				i if i < 1 => Length::default(),
+				1 => Length::Static(v[0]),
+				_ => Length::Flex(v.into_iter().collect())
+			}
+		}
 
-        let explicit_font_size = match &self.input.fontsizing {
-            FontSizing::Static(i) => Some(*i),
-            FontSizing::Selection(_) => None,
-        };
+		fn to_vec<T>(&self) -> Vec<T> where T: From<u16> + std::cmp::Ord {
+			match self {
+	            Length::Static(i) => vec![T::from(*i)],
+	            Length::Flex(f) => {
+	                let mut v = f.iter().map(|n| T::from(*n)).collect::<Vec<T>>();
+	                v.sort_unstable();
+	                v
+	            }
+	        }
+		}
 
-        match &self.input.dimensions {
-            LayoutDimensions::Static(width, height) => {
-                let layout = self._generate_layout(width, height, explicit_font_size)?;
-                if layout.fits() {
-                    return Ok(layout)
-                }
-                Err(LayoutError::CouldNotFitLayout)
-            },
-            LayoutDimensions::StaticWidthFlexHeight(width, heights_unsorted) => {
-                let mut heights: Vec<&i32> = heights_unsorted.iter().collect();
-                heights.sort_unstable(); 
-                for height in heights {
-                    let layout = self._generate_layout(width, height, explicit_font_size)?;
-                    if layout.fits() {
-                        return Ok(layout);
-                    }
-                }
-                Err(LayoutError::CouldNotFitLayout)
-            },
-            LayoutDimensions::FlexWidthStaticHeight(unsorted_widths, height) => {
-                let mut widths: Vec<&i32> = unsorted_widths.iter().collect();
-                widths.sort_unstable(); 
-                for width in widths {
-                    let layout = self._generate_layout(width, height, explicit_font_size)?;
-                    if layout.fits() {
-                        return Ok(layout);
-                    }
-                }
-                Err(LayoutError::CouldNotFitLayout)
-            },
-            LayoutDimensions::Flex(unsorted_widths, unsorted_heights) => {
-                // TODO: Sort these also!
-                // try to expand width first
-                let mut heights: Vec<&i32> = unsorted_heights.iter().collect();
-                heights.sort_unstable(); 
+		/// get a sorted vec of all possible combinations of this and another length
+		fn combine(&self, b: &Length) -> Vec<(i32, i32)> {
+			let a = self.to_vec();
+			let b = b.to_vec().into_iter();
+	        let mut combined: Vec<(i32, i32)> = b
+	            .flat_map(|h| a.iter().map(move |w| (*w, h)))
+	            .collect();
+	        combined.sort_unstable();
+	        combined
+		}
 
-                let mut widths: Vec<&i32> = unsorted_widths.iter().collect();
-                widths.sort_unstable(); 
+		/// get a sorted vec of all possible combinations of this and another length,
+		/// scaled by pango::SCALE
+		pub fn combine_and_pango_scale(&self, b: &Length) -> Vec<(i32, i32)> {
+			self.combine(b)
+				.into_iter()
+				.map(|(a, b)| (a * SCALE, b * SCALE))
+				.collect()
+		}
+	}
 
-                let max_width = &widths.last().unwrap();
-                let min_height = &heights.first().unwrap();
+	impl Default for Length {
+	    fn default() -> Self {
+	        Length::Static(500)
+	    }
+	}
 
-                for width in &widths {
-                    let layout = self._generate_layout(width, min_height, explicit_font_size)?;
-                    if layout.fits() {
-                        return Ok(layout);
-                    }
-                }
+	impl TryFrom<&str> for Length {
+		type Error = ParseIntError;
+		fn try_from(s: &str) -> Result<Self, Self::Error> {
+			Length::from_str(s)
+		}
+	}
 
-                for height in &heights {
-                    let layout = self._generate_layout(max_width, height, explicit_font_size)?;
-                    if layout.fits() {
-                        return Ok(layout);
-                    }
-                }
+	impl TryFrom<String> for Length {
+		type Error = ParseIntError;
+		fn try_from(s: String) -> Result<Self, Self::Error> {
+			Length::from_str(&s)
+		}
+	}
 
-                Err(LayoutError::CouldNotFitLayout)
-            }
-        }
-    }
+	impl FromStr for Length {
+		type Err = ParseIntError;
+    	fn from_str(s: &str) -> Result<Self, Self::Err> {
+    		Length::from_str(s)
+    	}
+	}
+
+	impl <T> From<Vec<T>> for Length where u16: From<T>, T: Clone {
+		fn from(v: Vec<T>) -> Length {
+			Length::from_vec(v)
+		}
+	}
+
+	impl From<u16> for Length {
+		fn from(i: u16) -> Length {
+			Length::Static(i)
+		}
+	}
+}
+
+mod tb {
+	use crate::pango_interactions::{FontDescriptionWrapper, PangoAlignmentDef, PangoCompatibleString};
+	use crate::fontsizing::FontSizing;
+	use serde::Deserialize;
+	use super::Length;
+	use crate::layout::{LayoutSource, ExtendedLayout, ExportLayout};
+	use pango::{FontDescription, Alignment, Layout, SCALE};
+	use std::error::Error;
+	use std::convert::TryFrom;
+	use base64;
+
+	/// A textbox which will have its text expand to fit.
+	/// If it has a flexible width or height, the smallest possible
+	/// dimensions will be used with the largest possible font size 
+	/// that fits those dimensions.
+	#[derive(Debug, Deserialize)]
+	pub struct TextBox {
+		/// the text of this textbox. Can be in Pango markup language.
+	    pub markup: PangoCompatibleString,
+	   	/// possible widths
+	    #[serde(default)]
+	    pub width: Length,
+	   	/// possible heights
+	    #[serde(default)]
+	    pub height: Length,
+	    #[serde(default)]
+	    /// a wrapper around the font description to use
+	    pub font_desc: FontDescriptionWrapper,
+	    /// the alignment of the text
+	    #[serde(with = "PangoAlignmentDef", default = "PangoAlignmentDef::default")]
+	   	pub alignment: Alignment,
+	   	/// the font sizes to try
+	    #[serde(default)]
+	    pub font_size: FontSizing,
+	}
+
+	impl TextBox {
+		pub fn to_svg_image(&self) -> Result<(String, i32, i32), Box<Error>> {
+			let layout = Layout::create_layout(self)?;
+			let textbox = layout.as_string(None, None, None, None)?;
+			let width = layout.get_width() / SCALE;
+			let height = layout.get_height() / SCALE;
+			Ok((textbox, width, height))
+		}
+
+		pub fn to_svg_image_tag(&self, x: i32, y: i32) -> Result<String, Box<Error>> {
+			let (svg, width, height) = self.to_svg_image()?;
+			let b64 = base64::encode(&svg);
+	        let prefixed_b64 = format!("data:image/svg+xml;base64, {}", b64);
+	        let s = format!("<image xmlns:xlink=\"http://www.w3.org/1999/xlink\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" xlink:href=\"{}\"/>",
+	            x, y, width, height, prefixed_b64);
+	       	Ok(s)
+		}
+
+		pub fn new(markup: &str) -> Result<Self, Box<Error>> {
+			let p = markup.parse::<PangoCompatibleString>()?;
+			Ok(TextBox {
+				markup: p,
+				width: Length::default(),
+				height: Length::default(),
+				font_desc: FontDescriptionWrapper::default(),
+				alignment: PangoAlignmentDef::default(),
+				font_size: FontSizing::default()
+			})
+		}
+
+		pub fn set_width<'a, T>(&'a mut self, w: T) -> Result<&'a mut TextBox, Box<Error>>
+			where Length: TryFrom<T>,
+			<Length as TryFrom<T>>::Error: Error + 'static {
+			let l = Length::try_from(w)?;
+			self.width = l;
+			Ok(self)
+		}
+
+		pub fn set_height<'a, T>(&'a mut self, h: T) -> Result<&'a mut TextBox, Box<Error>>
+			where Length: TryFrom<T>,
+			<Length as TryFrom<T>>::Error: Error + 'static{
+			let l = Length::try_from(h)?;
+			self.height = l;
+			Ok(self)
+		}
+
+		pub fn set_font_desc<'a>(&'a mut self, s: &'a str) -> Result<&'a mut TextBox, Box<Error>> {
+			let fd = FontDescriptionWrapper::convert(s)?;
+			self.font_desc = fd;
+			Ok(self)
+		}
+
+		pub fn set_font_size<'a>(&'a mut self, s: &'a str) -> Result<&'a mut TextBox, Box<Error>> {
+			let fs = s.parse::<FontSizing>()?;
+			self.font_size = fs;
+			Ok(self)
+		}
+
+		pub fn set_font_family<'a>(&'a mut self, f: &'a str) -> Result<&'a mut TextBox, Box<Error>> {
+			self.font_desc = self.font_desc.set_family(f);
+			Ok(self)
+		}
+
+		pub fn set_alignment<'a>(&'a mut self, a: &'a str) -> Result<&'a mut TextBox, Box<Error>> {
+			let alignment = match a {
+				"left" | "Left" => Alignment::Left,
+				"right" | "Right" => Alignment::Right,
+				"center" | "Center" | "centre" | "Centre" => Alignment::Center,
+				_ => Alignment::Center
+			};
+			self.alignment = alignment;
+			Ok(self)
+		}
+
+		pub fn set_font_variant<'a>(&'a mut self, v: &'a str) -> Result<&'a mut TextBox, Box<Error>> {
+			let v = match v {
+				"normal" | "Normal" => pango::Variant::Normal,
+				"smallcaps" | "SmallCaps" | "smallCaps" | "Smallcaps" => pango::Variant::SmallCaps,
+				_ => pango::Variant::Normal
+			};
+			self.font_desc = self.font_desc.set_variant(v);
+			Ok(self)
+		}
+
+		pub fn set_font_style<'a>(&'a mut self, s: &'a str) -> Result<&'a mut TextBox, Box<Error>> {
+			let s = match s {
+				"normal" | "Normal" => pango::Style::Normal,
+				"oblique" | "Oblique" => pango::Style::Oblique,
+				"italic" | "Italic" => pango::Style::Italic,
+				_ => pango::Style::Normal
+			};
+			self.font_desc = self.font_desc.set_style(s);
+			Ok(self)
+		}
+
+		pub fn set_font_weight<'a>(&'a mut self, w: &'a str) -> Result<&'a mut TextBox, Box<Error>> {
+			let w = match w {
+			    "thin" | "Thin" => pango::Weight::Thin,
+			    "ultralight" | "Ultralight" => pango::Weight::Ultralight,
+			    "light" | "Light" => pango::Weight::Light,
+			    "semilight" | "Semilight" => pango::Weight::Semilight,
+			    "book" | "Book" => pango::Weight::Book,
+			    "normal" | "Normal" => pango::Weight::Normal,
+			    "medium" | "Medium" => pango::Weight::Medium,
+			    "semibold" | "Semibold" => pango::Weight::Semibold,
+			    "bold" | "Bold" => pango::Weight::Bold,
+			    "ultrabold" | "Ultrabold" => pango::Weight::Ultrabold,
+			    "heavy" | "Heavy" => pango::Weight::Heavy,
+			    "ultraheavy" | "Ultraheavy" => pango::Weight::Ultraheavy,
+			    _ => pango::Weight::Normal
+			};
+			self.font_desc = self.font_desc.set_weight(w);
+			Ok(self)
+		}
+
+		pub fn set_min_font_size<'a>(&'a mut self, s: u16) -> Result<&'a mut TextBox, Box<Error>> {
+			let fs = self.font_size.clone();
+			let min_set = fs.set_min_size(s);
+			self.font_size = min_set;
+			Ok(self)	
+		}
+
+		pub fn set_max_font_size<'a>(&'a mut self, s: u16) -> Result<&'a mut TextBox, Box<Error>> {
+			let fs = self.font_size.clone();
+			let max_set = fs.set_max_size(s);
+			self.font_size = max_set;
+			Ok(self)	
+		}
+	}
+
+	impl LayoutSource for TextBox {
+		fn possible_font_sizes(&self) -> Vec<i32> {
+			self.font_size.to_pango_scaled_vec()
+		}
+		fn possible_dimensions(&self) -> Vec<(i32, i32)> {
+			self.width.combine_and_pango_scale(&self.height)
+		}
+		fn font_description(&self) -> &FontDescription {
+			self.font_desc.as_ref()
+		}
+		fn markup(&self) -> &str {
+			self.markup.as_ref()
+		}
+		fn alignment(&self) -> Alignment {
+			self.alignment
+		}
+	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-    use std::collections::HashSet;
-    use std::iter::FromIterator;
 
-    fn basic_input() -> TextBoxInput {
-        TextBoxInput {
-            markup: "Hello World".to_string(),
-            dimensions: LayoutDimensions::Static(100, 100),
-            font_desc: pango::FontDescription::new(),
-            alignment: pango::Alignment::Left,
-            fontsizing: FontSizing::Static(12),
-        }
-    }
-
-    #[test]
-    fn test_ordering_of_distance_options() {
-        // give a really small distance and font together with lots of really big distances
-        // to check that the smallest option is correctly being chosen, with odds of ~100: 1 that
-        // this won't happen by chance anyway
-        let mut input = basic_input();
-        let mut size_vec: Vec<i32> = (100..200).collect();
-        size_vec.insert(1, 20);
-        let size_set: HashSet<i32> = size_vec.iter().map(|x| *x).collect();
-        input.dimensions = LayoutDimensions::StaticWidthFlexHeight(100, size_set);
-        input.fontsizing = FontSizing::Static(10);
-        let output = LayoutBuilder::get_layout_output(&input).unwrap();
-        assert_eq!(output.height, 20);
-
-        let mut size_vec: Vec<i32> = (200..300).collect();
-        size_vec.insert(1, 100);
-        let size_set: HashSet<i32> = size_vec.iter().map(|x| *x).collect();
-
-        input.dimensions = LayoutDimensions::FlexWidthStaticHeight(size_set, 20);
-        let output = LayoutBuilder::get_layout_output(&input).unwrap();
-        assert_eq!(output.width, 100);
-    }
-
-    #[test]
-    fn test_generate_layout() {
-
-        let mut input = basic_input();
-        let static_layout = LayoutBuilder{input: &input}._generate_layout(&100, &100, Some(12)).unwrap();
-        input.fontsizing = FontSizing::from_range(Some(12), Some(100)).unwrap();
-        let flex_layout = LayoutBuilder{input: &input}._generate_layout(&100, &100, None).unwrap();
-
-        let static_font_size = static_layout.font_size();
-        let flex_font_size = flex_layout.font_size();
-        assert_eq!(static_font_size, 12 * pango::SCALE);
-        assert!(static_font_size != flex_font_size);
-        assert!(static_layout.fits());
-        assert!(flex_layout.fits());
-        // this is not the place to throw an error, even if it doesn't fit.
-        input.fontsizing = FontSizing::Static(100);
-        let oversized_layout = LayoutBuilder{input: &input}._generate_layout(&100, &100, Some(100)).unwrap();
-        assert!(!oversized_layout.fits());
-    }
-
-    #[test]
-    fn test_no_fit() {
-        let build_layout = |inp: &TextBoxInput| {
-            let builder = LayoutBuilder{input: inp};
-            builder.to_layout()
-        };
-
-        let build_dimensions = |widthvec: Vec<i32>, heightvec: Vec<i32>| {
-            let width = HashSet::from_iter(widthvec.into_iter());
-            let height = HashSet::from_iter(heightvec.into_iter());
-            LayoutDimensions::new(width, height)
-        };
-
-        let mut input = basic_input();
-        input.fontsizing = FontSizing::Static(25);
-        assert!(build_layout(&input).is_err());
-        input.fontsizing = FontSizing::from_range(Some(10), Some(25)).unwrap();
-        assert!(!build_layout(&input).is_err());
-        input.fontsizing = FontSizing::from_range(Some(25), Some(30)).unwrap();
-        assert!(build_layout(&input).is_err());
-        // now check with flex layout dimensions
-
-        // Logical dimensions of "Hello World" should be around 35 x 27 pixels on two lines.
-        // Because our fitting requirements are a bit harsher, the actual number is more like 46 x 36.
-        // On one line, logical = 68 x 14, actual = 90 x 14.
-
-        input.fontsizing = FontSizing::Static(10); 
-        input.dimensions = build_dimensions(vec![80, 90], vec![14]); // 14
-        let l = build_layout(&input).unwrap();
-        assert_eq!(l.px_width(), 90); // ie expands width if required
-        // expand width first, not height:
-        input.dimensions = build_dimensions(vec![80, 90], vec![14, 28]);
-        let l = build_layout(&input).unwrap();
-        assert_eq!(l.px_width(), 90);
-        assert_eq!(l.px_height(), 14);
-        // but expand height if necessary
-        input.dimensions = build_dimensions(vec![80, 90], vec![10, 20]);
-        let l = build_layout(&input).unwrap();
-        assert!(l.fits());
-        assert_eq!(l.px_width(), 90);
-        assert_eq!(l.px_height(), 20);
-        // don't expand unless we have to:
-        input.fontsizing = FontSizing::from_range(Some(2), Some(15)).unwrap();
-        let l = build_layout(&input).unwrap();
-        assert!(l.fits());
-        // occasionally fails?!
-        //assert_eq!(l.px_width(), 80);
-        assert_eq!(l.px_height(), 10);
-    }
+	#[test]
+	fn test_textbox_builder() {
+		let markup = "Hello World";
+		let mut t = TextBox::new(markup).unwrap();
+		t.set_width("100".to_string()).unwrap();
+		t.set_width("100 200".to_string()).unwrap();
+		t.set_width(100).unwrap();
+		t.set_width(vec![100_u16]).unwrap();
+	}
 }
+
+
+
+
 
