@@ -4,7 +4,6 @@ pub use tb::TextBox;
 mod lengths {
 
 	use std::num::ParseIntError;
-	use crate::utils::vec_from_str;
 	use serde::{Serialize, Deserialize};
 	use std::collections::HashSet;
 	use pango::SCALE;
@@ -25,7 +24,9 @@ mod lengths {
 	impl Length {
 
 		fn from_str(s: &str) -> Result<Self, ParseIntError> {
-			let v = vec_from_str::<u16>(s)?;
+	        let v = s.split_whitespace()
+	                 .map(|s| s.parse::<u16>())
+	                 .collect::<Result<Vec<u16>, ParseIntError>>()?;
 			Ok(Length::from_vec(v))
 		}
 

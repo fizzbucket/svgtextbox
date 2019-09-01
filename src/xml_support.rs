@@ -229,13 +229,8 @@ pub fn transform_xml(src: &str) -> Result<String, Box<Error>> {
 			XmlEvent::EndDocument => {
 				break;
 			},
-			XmlEvent::StartElement{ref name, ref attributes, ..} => {
-				if &name.local_name != "textbox" {
-					next.as_writer_event()
-						.map(|e| writer.write(e)
-									.or_else(Err));
-				} else {
-					let textbox_events = match handle_textbox(&mut parser, attributes) {
+			XmlEvent::StartElement{ref name, ref attributes, ..} if name.local_name == "textbox" => {
+				let textbox_events = match handle_textbox(&mut parser, attributes) {
 						Ok(o) => o,
 						Err(e) => return Err(e)
 					};
@@ -244,7 +239,6 @@ pub fn transform_xml(src: &str) -> Result<String, Box<Error>> {
 						 .map(|e| writer.write(e)
 						 	.or_else(Err));
 					}
-				}
 			},
 			_ => {next.as_writer_event()
 					.map(|e| writer.write(e)
@@ -255,47 +249,6 @@ pub fn transform_xml(src: &str) -> Result<String, Box<Error>> {
 
 	let s = std::str::from_utf8(&out)?;
 	Ok(s.to_string())
-
-	// // we now have an svg file with possibly many base64 embeds and lots of repetition.
-	// // For cleanliness's sake, we can pass it to librsvg and tidy it up.
-	// let out_bytes = glib::Bytes::from(&out);
-	// let input_stream = gio::MemoryInputStream::new_from_bytes(&out_bytes);
-
-	// let base_file: Option<&gio::File> = None;
-	// let cancellable: Option<&gio::Cancellable> = None;
-	// let handle = librsvg::Loader::new()
-	// 	.read_stream(&input_stream, base_file, cancellable)?;
- //    let renderer = librsvg::CairoRenderer::new(&handle);
-
- //    let intrinsic_dimensions = renderer.intrinsic_dimensions();
- //    let width = intrinsic_dimensions.width.expect("pasd").get_unitless();
- //    let height = intrinsic_dimensions.height.expect("asdf").get_unitless();
-    
- //    let mut writable = Vec::new();
- //    let surface = cairo::SvgSurface::for_stream(width, height, writable);
- //    let context = cairo::Context::new(&surface);
-
- //    renderer
- //        .render_document(
- //            &context,
- //            &cairo::Rectangle {
- //                x: 0.0,
- //                y: 0.0,
- //                width: f64::from(width),
- //                height: f64::from(height),
- //            },
- //        )
- //        .unwrap();
-
- //    let o = surface
- //        .finish_output_stream()
- //        .map_err(|_e| std::fmt::Error)?;
- //    let v = match o.downcast::<Vec<u8>>() {
- //        Ok(v) => Ok(v.to_vec()),
- //        Err(_e) => Err(std::fmt::Error),
- //    }?;
-	// let s = std::str::from_utf8(&v)?;
-	// Ok(s.to_string())
 }
 
 #[cfg(test)]

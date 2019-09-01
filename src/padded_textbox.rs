@@ -3,7 +3,6 @@ pub use pt::PaddedTextBox;
 
 mod padding {
 
-	use crate::utils::vec_from_str;
 	use std::error::Error;
 	use std::convert::TryFrom;
 	use std::fmt::Display;
@@ -23,7 +22,7 @@ mod padding {
 	    fn source(&self) -> Option<&(dyn Error + 'static)> {None}
 	}
 
-	/// padding around this textbox (in px)
+	/// padding around this textbox
 	#[derive(Debug, Deserialize)]
 	pub struct PaddingSpecification {
 	    pub left: u16,
@@ -54,7 +53,10 @@ mod padding {
 		}
 
 		pub(crate) fn from_str(s: &str) -> Result<Self, PaddingError> {
-			let v = vec_from_str::<u16>(s).map_err(|_| PaddingError)?;
+			let v = s.split_whitespace()
+                 .map(|s| s.parse::<u16>())
+                 .collect::<Result<Vec<u16>, std::num::ParseIntError>>()
+                 .map_err(|_| PaddingError)?;
 			PaddingSpecification::from_vec(v)
 		}
 
@@ -155,11 +157,7 @@ mod pt {
 			}
 
 			let padding_rect = xml::writer::XmlEvent::from(padding_rect_builder);
-			let mut events = Vec::new();
-			for event in parser {
-				let e = event?;
-				events.push(e);
-			}
+			let mut events = parser.into_iter().collect::<Result<Vec<xml::reader::XmlEvent>, xml::reader::Error>>()?;
 
 			let end_of_defs = events.iter().position(|e| {
 				if let xml::reader::XmlEvent::EndElement{name} = e {
@@ -200,9 +198,6 @@ mod pt {
 	        let prefixed_b64 = format!("data:image/svg+xml;base64, {}", b64);
 	        let s = format!("<image xmlns:xlink=\"http://www.w3.org/1999/xlink\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" xlink:href=\"{}\"/>",
 	            x, y, width, height, prefixed_b64);
-	       	// for compatability with old browsers and librsvg;
-
-
 	       	Ok(s)
 		}
 	}

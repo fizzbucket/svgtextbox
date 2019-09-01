@@ -1,5 +1,4 @@
 use serde::{Serialize, Deserialize};
-use crate::utils::vec_from_str;
 use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::str::FromStr;
@@ -136,15 +135,16 @@ impl Default for FontSizing {
 impl TryFrom<String> for FontSizing {
     type Error = std::num::ParseIntError;
     fn try_from(s: String) -> Result<Self, Self::Error> {
-        let p = s.parse::<FontSizing>()?;
-        Ok(p)
+        s.parse::<FontSizing>()
     }
 }
 
 impl FromStr for FontSizing {
     type Err = std::num::ParseIntError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let v = vec_from_str::<u16>(s)?;
+        let v = s.split_whitespace()
+                 .map(|s| s.parse::<u16>())
+                 .collect::<Result<Vec<u16>, Self::Err>>()?;
         Ok(FontSizing::from(v))
     }
 }

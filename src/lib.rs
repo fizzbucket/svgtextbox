@@ -2,7 +2,6 @@ mod xml_support;
 mod layout;
 mod fontsizing;
 mod pango_interactions;
-mod utils;
 mod textbox;
 mod padded_textbox;
 
@@ -15,95 +14,6 @@ pub use xml_support::transform_xml;
 
 
 
-// struct PaddingSpecification {
-//     left: u16,
-//     right: u16,
-//     top: u16,
-//     bottom: u16
-// }
-
-// struct HexColour(String);
-
-
-
-
-
-
-
-// macro_rules! errinator {
-//     ($name:ident, $msg:expr) => {
-//         impl std::fmt::Display for $name {
-//             fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-//                 write!(f, "{:?}", self)
-//             }
-//         }
-
-//         impl Error for $name {
-//             fn source(&self) -> Option<&(dyn Error + 'static)> {
-//                 None
-//             }
-//         }
-//     };
-// }
-
-
-// pub fn alignment_default() -> pango::Alignment {
-//     pango::Alignment::Center
-// }
-
-
-// #[derive(Debug, Clone)]
-// enum LayoutError {
-//     SizingError,
-//     BadConversion,
-// }
-
-
-
-
-
-// errinator!(LayoutError, "Error rendering a layout from textbox");
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// #[derive(Debug, Deserialize)]
-// pub struct PaddedTextBox {
-//     textbox: TextBox,
-//     padding: PaddingSpecification,
-//     x: u32,
-//     y: u32,
-//     border_width: Option<u16>,
-//     border_top: Option<HexColour>,
-//     border_bottom: Option<HexColour>,
-//     #[serde(flatten)]
-//     other: HashMap<String, Value>
-// }
-
-
-
-
-
-// fn to_pango_scale<T>(n: T) -> i32
-// where
-//     i32: std::convert::From<T>,
-// {
-//     i32::from(n) * pango::SCALE
-// }
 
 
 
