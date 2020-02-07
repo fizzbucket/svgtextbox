@@ -1,51 +1,37 @@
+use serde::de::{self, Visitor, MapAccess, SeqAccess};
+use std::fmt;
 use crate::layout::{RenderedTextbox, LayoutSource};
 use lazy_static::lazy_static;
 use pango::{Alignment, FontDescription, SCALE};
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Deserializer};
 use std::collections::{BTreeSet, HashMap};
 use std::convert::TryFrom;
 use std::default::Default;
 use std::fmt::Display;
-use std::iter::{self, IntoIterator, FromIterator, Extend};
 use std::num::NonZeroU16;
 use std::num::ParseIntError;
-use std::str::FromStr;
 use crate::errors::SvgTextBoxError;
 use std::ops::Deref;
 
 pub use crate::pango_wrappers::{AlignmentWrapper, FontDescriptionWrapper};
 
 /// a container to hold different groups of measurement units
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(untagged)]
+#[derive(Debug, Serialize, Clone)]
 pub enum UnitContainer {
-    AsSingle(NonZeroU16),
     AsSet(BTreeSet<NonZeroU16>),
     AsRange{
         min: NonZeroU16,
         max: NonZeroU16,
         step: Option<usize>
     },
-    Empty
 }
 
-impl Default for UnitContainer {
-    fn default() -> Self {
-        UnitContainer::AsSingle(NonZeroU16::new(1).unwrap())
-    }
-}
 
 impl UnitContainer {
 
     pub fn iter<'a>(&'a self) -> Box<dyn Iterator<Item=u16> + 'a> {
         match self {
-            UnitContainer::Empty => {
-                Box::new(iter::empty())
-            }
-            UnitContainer::AsSingle(s) => {
-                Box::new(iter::once(s.get()))
-            },
             UnitContainer::AsSet(s) => {
                 Box::new(s.iter().map(|n| n.get()))
             },
@@ -57,66 +43,6 @@ impl UnitContainer {
                 }
             }
         }
-    }
-
-    /// is this a set which could be expressed as a range?
-    fn compress(&mut self) {
-        if let UnitContainer::AsSet(set) = self {
-            if set.len() > 2 {
-                let a = set.iter();
-                let b = set.iter().skip(1);
-                let mut differences = a.zip(b).map(|(a, b)| b.get() - a.get());
-                let first_step = differences.next().unwrap();
-                let constant_step = differences.all(|s| s==first_step);
-                if constant_step {
-                    let min = *set.iter().min().unwrap();
-                    let max = *set.iter().max().unwrap();
-                    let step = NonZeroU16::new(first_step).unwrap();
-                    *self = UnitContainer::from_range_values(min, max, step);
-                }
-            }
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        if let UnitContainer::Empty = self {
-            true
-        } else {
-            false
-        }
-    }
-
-
-    pub fn push(&mut self, n: NonZeroU16) {
-        match self {
-            UnitContainer::Empty => {
-                *self = UnitContainer::AsSingle(n);
-            },
-            UnitContainer::AsSingle(i) => {
-                if *i != n {
-                    let v = vec![*i, n].into_iter();
-                    *self = UnitContainer::AsSet(v.collect());
-                }
-            },
-            UnitContainer::AsSet(s) => {
-                s.insert(n);
-            },
-            UnitContainer::AsRange{..} => {
-                let mut set = self.iter()
-                    .map(|n| NonZeroU16::new(n).unwrap())
-                    .collect::<BTreeSet<NonZeroU16>>();
-                set.insert(n);
-                *self = UnitContainer::AsSet(set);
-            }
-        }
-    }
-
-    pub(crate) fn from_range_values(min: NonZeroU16, max: NonZeroU16, step: NonZeroU16) -> Self {
-        let step = match step.get() {
-            1 => None,
-            u => Some(usize::from(u))
-        };
-        UnitContainer::AsRange{min, max, step}
     }
 }
 
@@ -132,38 +58,7 @@ impl IntoIterator for UnitContainer {
     }
 }
 
-impl Extend<NonZeroU16> for UnitContainer {
-    fn extend<T: IntoIterator<Item=NonZeroU16>>(&mut self, iter: T) {
-        for elem in iter {
-            self.push(elem);
-        }
-        self.compress();
-    }
-}
 
-
-impl FromIterator<NonZeroU16> for UnitContainer {
-    fn from_iter<I: IntoIterator<Item=NonZeroU16>>(iter: I) -> Self {
-        let set = iter.into_iter().collect::<BTreeSet<NonZeroU16>>();
-        let mut container = match set.len() {
-            0 => UnitContainer::Empty,
-            1 => UnitContainer::AsSingle(*set.iter().next().unwrap()),
-            _ => UnitContainer::AsSet(set),
-        };
-        container.compress();
-        container
-    }            
-}
-
-impl FromStr for UnitContainer {
-    type Err = SvgTextBoxError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let o = s.split_whitespace()
-                 .map(|n| n.parse::<NonZeroU16>())
-                 .collect::<Result<UnitContainer, ParseIntError>>()?;
-        Ok(o)
-    }
-}
 
 lazy_static! {
     static ref AMPERSAND_REGEX: Regex = Regex::new(r"&(?P<w>\s+)").unwrap();
@@ -173,8 +68,7 @@ static NULL_CHAR: char = '\u{0}';
 static UNACCEPTABLE_CHARS: [char; 2] = [ACCEL_MARKER, NULL_CHAR];
 
 
-#[derive(Default, Debug, PartialEq, Serialize, Deserialize, Clone)]
-#[serde(default)]
+#[derive(Default, Debug, PartialEq, Serialize, Clone)]
 pub struct PaddingSpecification {
     top: u16,
     bottom: u16,
@@ -202,65 +96,6 @@ impl PaddingSpecification {
 
     pub fn has_values(&self) -> bool {
         self.top != 0 || self.bottom != 0 || self.left != 0 || self.right != 0
-    }
-}
-
-impl From<(u16, u16, u16, u16)> for PaddingSpecification {
-    fn from(a: (u16, u16, u16, u16)) -> Self {
-        let (top, right, bottom, left) = a;
-
-        PaddingSpecification {
-            top,
-            right,
-            bottom,
-            left
-        }
-    }
-}
-
-impl From<[u16; 4]> for PaddingSpecification {
-    fn from(s: [u16; 4]) -> Self {
-        PaddingSpecification {top: s[0], right: s[1], bottom: s[2], left: s[3]}
-    }
-}
-
-impl From<&[u16]> for PaddingSpecification {
-    fn from(s: &[u16]) -> PaddingSpecification {
-        let v = s.iter().cloned().take(4).collect::<Vec<u16>>();
-        // follow css pattern
-        let (top, right, bottom, left) = match v[..] {
-            [] => (0, 0, 0, 0),
-            [s] => (s, s, s, s),
-            [top_and_bottom, right_and_left] => (
-                top_and_bottom,
-                right_and_left,
-                top_and_bottom,
-                right_and_left,
-            ),
-            [top, right_and_left, bottom] => (top, right_and_left, bottom, right_and_left),
-            [top, right, bottom, left] => (top, right, bottom, left),
-            _ => unreachable!()
-        };
-        PaddingSpecification {top, right, bottom, left}
-    }
-}
-
-impl FromIterator<u16> for PaddingSpecification {
-    fn from_iter<I: IntoIterator<Item=u16>>(iter: I) -> Self {
-        let v = iter.into_iter()
-            .take(5)
-            .collect::<Vec<u16>>();
-        PaddingSpecification::from(&v[..])
-    }
-}
-
-impl FromStr for PaddingSpecification {
-    type Err = SvgTextBoxError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let o = s.split_whitespace()
-            .map(|n| n.parse::<u16>())
-            .collect::<Result<PaddingSpecification, ParseIntError>>()?;
-        Ok(o)
     }
 }
 
@@ -315,17 +150,15 @@ impl TryFrom<String> for PangoCompatibleString {
     }
 }
 
-impl TryFrom<&str> for PangoCompatibleString {
-    type Error = SvgTextBoxError;
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        PangoCompatibleString::new(s)
-    }
-}
-
-impl FromStr for PangoCompatibleString {
-    type Err = SvgTextBoxError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        PangoCompatibleString::new(s)
+fn get_default_font_size() -> UnitContainer {
+    let min = NonZeroU16::new(10)
+        .unwrap();
+    let max = NonZeroU16::new(100)
+        .unwrap();
+    UnitContainer::AsRange {
+        min,
+        max,
+        step: None
     }
 }
 
@@ -339,13 +172,13 @@ pub struct TextBox {
     /// possible heights
     pub height: UnitContainer,
     /// a wrapper around the font description to use
-    #[serde(default)]
+    #[serde(default, alias="font-desc")]
     pub font_desc: FontDescriptionWrapper,
     /// the alignment of the text
     #[serde(default)]
     pub alignment: AlignmentWrapper,
     /// possible font sizes
-    #[serde(default)]
+    #[serde(default="get_default_font_size", alias="font-size")]
     pub font_size: UnitContainer,
     /// values for padding
     #[serde(default)]
@@ -372,15 +205,8 @@ macro_rules! setter {
 
 impl TextBox {
 
-    pub fn new(markup: PangoCompatibleString, width: UnitContainer, height: UnitContainer) -> Result<Self, SvgTextBoxError> {
-        if width.is_empty() {
-            return Err(SvgTextBoxError::NoValidWidths);
-        }
-        if height.is_empty() {
-            return Err(SvgTextBoxError::NoValidHeights);
-        }
-
-        Ok(TextBox{
+    pub fn new(markup: PangoCompatibleString, width: UnitContainer, height: UnitContainer) -> Self {
+        TextBox{
             markup,
             width,
             height,
@@ -393,7 +219,7 @@ impl TextBox {
             },
             padding: PaddingSpecification::default(),
             padding_attrs: HashMap::new(),
-        })
+        }
     }
 
     setter!(set_font_size, UnitContainer, font_size);
@@ -461,6 +287,187 @@ impl LayoutSource for TextBox {
     }
 }
 
+impl <'de> Deserialize<'de> for PaddingSpecification {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>
+    {
+        deserializer.deserialize_any(PaddingSpecificationVisitor)
+    }
+}
+
+impl <'de> Deserialize<'de> for UnitContainer {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>
+    {
+        deserializer.deserialize_any(UnitContainerVisitor)
+    }
+}
+
+struct UnitContainerVisitor;
+
+impl <'de> Visitor<'de> for UnitContainerVisitor {
+    type Value = UnitContainer;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a single integer, a sequence of integers, a string composed of integers seperated by a space, a map of min, max, and step")
+    }
+
+    fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+        let integers = v.split_whitespace()
+                 .map(|n| n.parse::<NonZeroU16>())
+                 .collect::<Result<BTreeSet<NonZeroU16>, ParseIntError>>()
+                 .map_err(|_| de::Error::invalid_value(de::Unexpected::Str(v), &self))?;
+        if integers.len() == 0 {
+            return Err(de::Error::invalid_length(0, &self));
+        }
+
+        Ok(UnitContainer::AsSet(integers))
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where A: SeqAccess<'de>
+    {
+        let mut values = BTreeSet::new();
+        while let Some(v) = seq.next_element()? {
+            values.insert(v);
+        }
+        if values.len() == 0 {
+            return Err(de::Error::invalid_length(0, &self));
+        }
+        Ok(UnitContainer::AsSet(values))
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let mut min: Option<NonZeroU16> = None;
+        let mut max: Option<NonZeroU16> = None;
+        let mut step: Option<usize> = None;
+
+        while let Some((k, v)) = map.next_entry()? {
+            match k {
+                "min" => min = Some(v),
+                "max" => max = Some(v),
+                "step" => {
+                    let u = u16::from(v);
+                    let u = usize::from(u);
+                    step = Some(u);
+                },
+                _ => {}
+            }
+        }
+
+        let max = max.unwrap_or(NonZeroU16::new(std::u16::MAX).unwrap());
+        let min = min.unwrap_or(NonZeroU16::new(1).unwrap());
+
+        Ok(UnitContainer::AsRange{
+            min,
+            max,
+            step
+        })
+    }
+
+    fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
+        let u = u16::try_from(v)
+            .map_err(|_| de::Error::invalid_value(de::Unexpected::Unsigned(v as u64), &self))?;
+        let u = match NonZeroU16::new(u) {
+            Some(i) => Ok(i),
+            None => Err(de::Error::invalid_value(de::Unexpected::Unsigned(v as u64), &self))
+        }?;
+        let s = std::iter::once(u)
+            .collect::<BTreeSet<_>>();
+        Ok(UnitContainer::AsSet(s))
+    }
+}
+
+struct PaddingSpecificationVisitor;
+
+impl <'de> Visitor<'de> for PaddingSpecificationVisitor {
+    type Value = PaddingSpecification;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a string or single integer or sequence of integers in the format of css padding, or a map of left, right, top, bottom")
+    }
+
+    fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+        let integers = v.split_whitespace()
+            .map(|n| n.parse::<u16>())
+            .collect::<Result<Vec<u16>, ParseIntError>>()
+            .map_err(|_| de::Error::invalid_value(de::Unexpected::Str(v), &self))?;
+        let (top, right, bottom, left) = match integers[..4] {
+            [] => (0, 0, 0, 0),
+            [i] => (i, i, i, i),
+            [top_and_bottom, right_and_left] => (
+                top_and_bottom,
+                right_and_left,
+                top_and_bottom,
+                right_and_left,
+            ),
+            [top, right_and_left, bottom] => (top, right_and_left, bottom, right_and_left),
+            [top, right, bottom, left] => (top, right, bottom, left),
+            _ => unreachable!(),
+        };
+        Ok(PaddingSpecification {top, right, bottom, left})
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where A: SeqAccess<'de>
+    {
+        let mut values: Vec<u16> = Vec::new();
+        while let Some(v) = seq.next_element()? {
+            values.push(v);
+            if values.len() > 4 {
+                break;
+            }
+        }
+        let (top, right, bottom, left) = match values[..4] {
+            [] => (0, 0, 0, 0),
+            [i] => (i, i, i, i),
+            [top_and_bottom, right_and_left] => (
+                top_and_bottom,
+                right_and_left,
+                top_and_bottom,
+                right_and_left,
+            ),
+            [top, right_and_left, bottom] => (top, right_and_left, bottom, right_and_left),
+            [top, right, bottom, left] => (top, right, bottom, left),
+            _ => unreachable!()
+        };
+        Ok(PaddingSpecification {top, right, bottom, left})
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+        where A: MapAccess<'de>
+    {
+        let mut top = 0;
+        let mut bottom = 0;
+        let mut right = 0;
+        let mut left = 0;
+
+        while let Some((k, v)) = map.next_entry()? {
+            match k {
+                "padding-top" | "top" => top = v,
+                "padding-bottom" | "bottom" => bottom = v,
+                "padding-right" | "right" => right = v,
+                "padding-left" | "left" => left = v,
+                _ => {}
+            }
+        }
+
+        Ok(PaddingSpecification{top, bottom, right, left})
+    }
+
+    fn visit_u16<E: de::Error>(self, v: u16) -> Result<Self::Value, E> {
+        Ok(PaddingSpecification{top: v, bottom: v, right: v, left: v})
+    }
+
+    fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
+        let v = u16::try_from(v)
+            .map_err(|_| de::Error::invalid_value(de::Unexpected::Unsigned(v as u64), &self))?;
+        Ok(PaddingSpecification{top: v, bottom: v, right: v, left: v})
+    }
+}
+
 #[cfg(test)]
 mod textbox_tests {
     use super::*;
@@ -510,7 +517,9 @@ mod textbox_tests {
                 <defs>
                     <def></def>
                 </defs>
-                <rect fill="red" height="50" width="50" x="0" y="0"/>
+                <g>
+                    <rect fill="red" height="50" width="50" x="0" y="0"/>
+                </g>
                 <rect x="0" y="0" width="100" height="100"></rect>
             </svg>"#
             .split_whitespace()

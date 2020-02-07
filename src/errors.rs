@@ -7,6 +7,8 @@ use std::ffi::NulError;
 use glib::Error as GlibError;
 use cairo::StreamWithError;
 use std::any::Any;
+use libxml::parser::XmlParseError;
+use serde_json::Error as SerdeJsonError;
 
 #[derive(Debug)]
 pub enum SvgTextBoxError {
@@ -34,6 +36,10 @@ pub enum SvgTextBoxError {
     Any(Box<dyn Any>),
     NSError,
     StackedTextboxes,
+    XmlParseError(XmlParseError),
+    XmlNoRoot,
+    SerdeJsonError(SerdeJsonError),
+    XsltError,
     Xml
 }
 
@@ -94,5 +100,17 @@ impl From<FromUtf8Error> for SvgTextBoxError {
 impl From<Box<dyn Any>> for SvgTextBoxError {
     fn from(e: Box<dyn Any>) -> Self {
         SvgTextBoxError::Any(e)
+    }
+}
+
+impl From<XmlParseError> for SvgTextBoxError {
+    fn from(e: XmlParseError) -> Self {
+        SvgTextBoxError::XmlParseError(e)
+    }
+}
+
+impl From<SerdeJsonError> for SvgTextBoxError {
+    fn from(e: SerdeJsonError) -> Self {
+        SvgTextBoxError::SerdeJsonError(e)
     }
 }

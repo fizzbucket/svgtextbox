@@ -13,25 +13,8 @@
 			<xsl:attribute name="__id">
             	<xsl:text>textbox-</xsl:text><xsl:value-of select="count($preceding_boxes)"/>
             </xsl:attribute>
-			<xsl:text>&#xA;{</xsl:text>
-			<xsl:for-each select="./@*">
-				<xsl:text>"</xsl:text>
-				<xsl:value-of select="name()"/>
-				<xsl:text>": </xsl:text>
-				<xsl:choose>
-					<xsl:when test="(normalize-space(.) != . or string(number(.)) = 'NaN' or (substring(. , string-length(.), 1) = '.') or (substring(., 1, 1) = '0') and not(. = '0')) and not(. = 'false') and not(. = 'true') and not(. = 'null')">
-						<xsl:text>"</xsl:text>
-							<xsl:value-of select="."/>
-						<xsl:text>"</xsl:text>
-					</xsl:when>
-					<xsl:otherwise>
-						<xsl:value-of select="."/>
-					</xsl:otherwise>
-				</xsl:choose>
-				<xsl:text>,&#xA;</xsl:text>
-			</xsl:for-each>
-			<xsl:text>"markup": "</xsl:text><xsl:apply-templates select="./svg:markup/node()"/><xsl:text>"</xsl:text>
-			<xsl:text>}</xsl:text>
+            <xsl:copy-of select="./@*" />
+            <xsl:apply-templates select="./svg:markup"/>
 		</xsl:element>
 	</xsl:template>
 
@@ -43,6 +26,7 @@
 		<xsl:value-of select="' '" />
 	</xsl:template>
 
+	<xsl:strip-space elements="*"/>
 
 	<xsl:template match="svg:br">
 		<xsl:text>&#xA;</xsl:text>
